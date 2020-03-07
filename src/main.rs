@@ -3,16 +3,24 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate reqwest;
 
-use std::fmt;
-use std::fmt::Display;
 use std::error::Error;
 use std::collections::HashMap;
-use serde_derive::Deserialize;
-use serde_json::Value;
+use std::fmt;
+use std::rc::Rc;
+
 use reqwest::blocking::Client;
 use reqwest::header;
+use serde_derive::Deserialize;
+use serde_json::Value;
 
-type SObjectType = String;
+struct SObjectType {
+    api_name: String
+}
+impl fmt::Display for SObjectType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.api_name)
+    }
+}
 
 #[derive(Deserialize)]
 struct QueryResult {
@@ -43,9 +51,19 @@ impl QueryIterator<'_> {
         let res = self.iterator.next();
 
         match res {
-            Some(sobj) => Some(SObject::from_query_result(&sobj, self.sobjecttype, self.conn).ok()),
+            Some(sobj) => SObject::from_query_result(&sobj, Rc::clone(&self.sobjecttype), self.conn).ok(),
             None => None
         }
+    }
+
+    fn get_next_results(&mut self) {
+        if let Some(next_url) = &self.result.nextRecordsUrl {
+            let request_url = format!("{}/{}", self.conn.instance_url, next_url);
+            self.result = self.conn.client.get(&request_url)
+                .send().unwrap()
+                .json().unwrap();
+            self.iterator = self.result.records.into_iter();
+        } 
     }
 }
 
@@ -55,18 +73,12 @@ impl Iterator for QueryIterator<'_> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         (self.result.totalSize, Some(self.result.totalSize))
     }
- 
+
     fn next(&mut self) -> Option<Self::Item> {
         let res = self.process_next();
 
         if res.is_none() && !self.result.done {
-            if let Some(next_url) = self.result.nextRecordsUrl {
-                let request_url = format!("{}/{}", self.conn.instance_url, next_url);
-                self.result = self.conn.client.get(&request_url)
-                    .send()?
-                    .json()?;
-                self.iterator = self.result.records.into_iter();
-            } 
+            self.get_next_results();
             self.process_next()
         } else {
             res
@@ -76,7 +88,7 @@ impl Iterator for QueryIterator<'_> {
 
 impl ExactSizeIterator for QueryIterator<'_> {
     fn len(&self) -> usize {
-        self.totalSize
+        self.result.totalSize
     }
 }
 
@@ -88,27 +100,29 @@ pub struct SalesforceId {
 impl SalesforceId {
 
     pub fn new(id: &str) -> Result<SalesforceId, &'static str> {
-        const alnums: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
+        const alnums: &[u8] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345".as_bytes();
         if id.len() != 15 && id.len() != 18 {
             return Err("Invalid Salesforce Id")
         }
 
-        let full_id = String::with_capacity(18);
+        let mut full_id = String::with_capacity(18);
         full_id.push_str(id);
 
         if full_id.len() == 15 {
-            let bitstring: usize = 0;
+            let mut bitstring: usize = 0;
+            let bytes = id.as_bytes();
 
             for i in 0..15 {
-                if full_id[i] >= 'A' && full_id[i] <= 'Z' {
+                // 65 == 'A'; 90 == 'Z'
+                if bytes[i] >= 65 && bytes[i] <= 90 {
                     bitstring |= 1 << i
                 }
             }
     
             // Take three slices of the bitstring and use them as 5-bit indices into the alnum sequence.
-            full_id.push_str(alnums[bitstring & 0x1F]);
-            full_id.push_str(alnums[bitstring>>5 & 0x1F]);
-            full_id.push_str(alnums[bitstring>>10]);
+            full_id.push(alnums[bitstring & 0x1F] as char);
+            full_id.push(alnums[bitstring>>5 & 0x1F] as char);
+            full_id.push(alnums[bitstring>>10] as char);
         }
 
         Ok(SalesforceId { id: full_id })
@@ -148,14 +162,14 @@ impl SObject {
     }
 
     fn from_query_result(value: &serde_json::Value, sobjecttype: Rc<SObjectType>, conn: &Connection) -> Result<SObject, Box<dyn Error>> {
-        let ret = SObject::new(None, Rc::clone(sobjecttype), HashMap::new());
+        let mut ret = SObject::new(None, Rc::clone(&sobjecttype), HashMap::new());
 
         if let Value::Object(content) = value {
             for k in content.keys() {
-                match content.get(k)? {
-                    Value::Bool(b) => ret.put(k, FieldValue::Checkbox(*b)),
-                    Value::String(s) => ret.put(k, FieldValue::Text(s.clone())),
-                    Value::Number(n) => ret.put(k, FieldValue::Number(n.as_f64()?)),
+                match content.get(k) {
+                    Some(Value::Bool(b)) => ret.put(k, FieldValue::Checkbox(*b)),
+                    Some(Value::String(s)) => ret.put(k, FieldValue::Text(s.clone())),
+                    Some(Value::Number(n)) => ret.put(k, FieldValue::Number(n.as_f64().unwrap())),
                     _ => {}
                 }
             }
@@ -187,9 +201,18 @@ impl fmt::Display for CreateResult {
 impl Error for CreateResult {
 }
 
-#[derive(Debug, Display, Error)]
+#[derive(Debug)]
 pub struct SalesforceError {
     error: String,
+} 
+
+impl fmt::Display for SalesforceError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+         write!(f, "{}", self.error)
+    }
+}
+
+impl Error for SalesforceError {
 }
 
 pub struct Connection {
@@ -217,17 +240,17 @@ impl Connection {
         })
     }
 
-    pub fn get_type(&mut self, type_name: &str) -> Option<&SObjectType> {
+    pub fn get_type(&mut self, type_name: &str) -> Option<&Rc<SObjectType>> {
         if !self.sobject_types.contains_key(type_name) {
-            self.sobject_types.insert(type_name.to_string(), Rc::new(type_name.to_string()));
+            self.sobject_types.insert(type_name.to_string(), Rc::new(SObjectType { api_name: type_name.to_string()} ));
         }
 
         self.sobject_types.get(type_name)
     }
 
     pub fn create(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
-        if let Some(id) = obj.id {
-            return Err(Box::new(SalesforceError { error: "This object already has a Salesforce Id" }))
+        if let Some(id) = &obj.id {
+            return Err(Box::new(SalesforceError { error: "This object already has a Salesforce Id".to_string() }))
         }
 
         let request_url = format!("{}/services/data/{}/sobjects/{}/", self.instance_url, self.api_version, obj.sobjecttype);
@@ -281,7 +304,7 @@ impl Connection {
             .send()?
             .json()?;
 
-        Ok(QueryIterator { result: result, Rc::clone(sobjecttype), conn: self, iterator: result.records.iter()})
+        Ok(QueryIterator { result: result, sobjecttype: Rc::clone(&sobjecttype), conn: self, iterator: result.records.into_iter()})
     }
 
     pub fn query_all(&self, query: &str) -> Result<QueryIterator, Box<dyn Error>> {
