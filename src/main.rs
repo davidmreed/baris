@@ -22,108 +22,59 @@ impl fmt::Display for SObjectType {
     }
 }
 
-#[derive(Deserialize)]
-struct QueryResult {
-    done: bool,
-    records: Vec<serde_json::Value>,
-    totalSize: usize,
-    nextRecordsUrl: Option<String>,
-}
+#[derive(Debug)]
+pub enum SalesforceError {
+    InvalidIdError(String),
+    CreateExistingRecord(),
+    GeneralError(String)
+} 
 
-pub struct QueryIterator<'a> {
-    result: QueryResult,
-    conn: &'a Connection,
-    sobjecttype: Rc<SObjectType>,
-    iterator: std::vec::IntoIter<serde_json::Value>,
-}
-
-impl QueryIterator<'_> {
-    fn new<'a>(result: QueryResult, conn: &'a Connection, sobjecttype: Rc<SObjectType>) -> QueryIterator<'a> {
-        QueryIterator {
-            result,
-            conn,
-            sobjecttype,
-            iterator: result.records.into_iter()
+impl fmt::Display for SalesforceError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SalesforceError::InvalidIdError(id) => write!(f, "Invalid Salesforce Id: {}", id),
+            SalesforceError::CreateExistingRecord() => write!(f, "Cannot create record with an Id"),
+            SalesforceError::GeneralError(err) => write!(f, "General Salesforce error: {}", err)
         }
-    }
-
-    fn process_next(&mut self) -> Option<SObject> {
-        let res = self.iterator.next();
-
-        match res {
-            Some(sobj) => SObject::from_query_result(&sobj, Rc::clone(&self.sobjecttype), self.conn).ok(),
-            None => None
-        }
-    }
-
-    fn get_next_results(&mut self) {
-        if let Some(next_url) = &self.result.nextRecordsUrl {
-            let request_url = format!("{}/{}", self.conn.instance_url, next_url);
-            self.result = self.conn.client.get(&request_url)
-                .send().unwrap()
-                .json().unwrap();
-            self.iterator = self.result.records.into_iter();
-        } 
+         
     }
 }
 
-impl Iterator for QueryIterator<'_> {
-    type Item = SObject;
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.result.totalSize, Some(self.result.totalSize))
-    }
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let res = self.process_next();
-
-        if res.is_none() && !self.result.done {
-            self.get_next_results();
-            self.process_next()
-        } else {
-            res
-        }
-    }
+impl Error for SalesforceError {
 }
 
-impl ExactSizeIterator for QueryIterator<'_> {
-    fn len(&self) -> usize {
-        self.result.totalSize
-    }
-}
 
 #[derive(Debug)]
 pub struct SalesforceId {
-    id: String,
+    id: [u8; 18],
 }
 
 impl SalesforceId {
+    pub fn new(id: &str) -> Result<SalesforceId, SalesforceError> {
+        const ALNUMS: &[u8] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345".as_bytes();
 
-    pub fn new(id: &str) -> Result<SalesforceId, &'static str> {
-        const alnums: &[u8] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345".as_bytes();
         if id.len() != 15 && id.len() != 18 {
-            return Err("Invalid Salesforce Id")
+            return Err(SalesforceError::InvalidIdError(id.to_string()))
         }
 
-        let mut full_id = String::with_capacity(18);
-        full_id.push_str(id);
+        let mut full_id: [u8; 18] = [0; 18];
+        let mut bitstring: usize = 0;
 
-        if full_id.len() == 15 {
-            let mut bitstring: usize = 0;
-            let bytes = id.as_bytes();
-
-            for i in 0..15 {
-                // 65 == 'A'; 90 == 'Z'
-                if bytes[i] >= 65 && bytes[i] <= 90 {
+        for (i, c) in id[..15].chars().enumerate() {
+            if c.is_ascii_alphanumeric() {
+                if c.is_ascii_uppercase() {
                     bitstring |= 1 << i
                 }
+                full_id[i] = c as u8;
+            } else {
+                return Err(SalesforceError::InvalidIdError(id.to_string()))
             }
-    
-            // Take three slices of the bitstring and use them as 5-bit indices into the alnum sequence.
-            full_id.push(alnums[bitstring & 0x1F] as char);
-            full_id.push(alnums[bitstring>>5 & 0x1F] as char);
-            full_id.push(alnums[bitstring>>10] as char);
         }
+    
+        // Take three slices of the bitstring and use them as 5-bit indices into the alnum sequence.
+        full_id[15] = ALNUMS[bitstring & 0x1F] as u8;
+        full_id[16] = ALNUMS[bitstring>>5 & 0x1F] as u8;
+        full_id[17] = ALNUMS[bitstring>>10] as u8;
 
         Ok(SalesforceId { id: full_id })
     }
@@ -131,7 +82,7 @@ impl SalesforceId {
 
 impl fmt::Display for SalesforceId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.id)
+        write!(f, "{}", std::str::from_utf8(&self.id).unwrap())
     }
 }
 
@@ -201,18 +152,74 @@ impl fmt::Display for CreateResult {
 impl Error for CreateResult {
 }
 
-#[derive(Debug)]
-pub struct SalesforceError {
-    error: String,
-} 
+#[derive(Deserialize)]
+struct QueryResult {
+    done: bool,
+    records: Vec<serde_json::Value>,
+    totalSize: usize,
+    nextRecordsUrl: Option<String>,
+}
 
-impl fmt::Display for SalesforceError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-         write!(f, "{}", self.error)
+pub struct QueryIterator<'a> {
+    result: QueryResult,
+    conn: &'a Connection,
+    sobjecttype: Rc<SObjectType>,
+    iterator: std::vec::Iter<serde_json::Value>,
+}
+
+impl QueryIterator<'_> {
+    fn new<'a>(result: QueryResult, conn: &'a Connection, sobjecttype: Rc<SObjectType>) -> QueryIterator<'a> {
+        QueryIterator {
+            result,
+            conn,
+            sobjecttype,
+            iterator: result.records.iter()
+        }
+    }
+
+    fn process_next(&mut self) -> Option<Result<SObject, Box<dyn Error>>> {
+        let res = self.iterator.next();
+
+        match res {
+            Some(sobj) => Some(SObject::from_query_result(&sobj, Rc::clone(&self.sobjecttype), self.conn)),
+            None => None
+        }
+    }
+
+    fn get_next_results(&mut self) {
+        if let Some(next_url) = &self.result.nextRecordsUrl {
+            let request_url = format!("{}/{}", self.conn.instance_url, next_url);
+            self.result = self.conn.client.get(&request_url)
+                .send().unwrap()
+                .json().unwrap();
+            self.iterator = self.result.records.iter();
+        } 
     }
 }
 
-impl Error for SalesforceError {
+impl Iterator for QueryIterator<'_> {
+    type Item = Result<SObject, Box<dyn Error>>;
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.result.totalSize, Some(self.result.totalSize))
+    }
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let res = self.process_next();
+
+        if res.is_none() && !self.result.done {
+            self.get_next_results();
+            self.process_next()
+        } else {
+            res
+        }
+    }
+}
+
+impl ExactSizeIterator for QueryIterator<'_> {
+    fn len(&self) -> usize {
+        self.result.totalSize
+    }
 }
 
 pub struct Connection {
@@ -250,10 +257,15 @@ impl Connection {
 
     pub fn create(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
         if let Some(id) = &obj.id {
-            return Err(Box::new(SalesforceError { error: "This object already has a Salesforce Id".to_string() }))
+            return Err(Box::new(SalesforceError::CreateExistingRecord))
         }
 
-        let request_url = format!("{}/services/data/{}/sobjects/{}/", self.instance_url, self.api_version, obj.sobjecttype);
+        let request_url = format!(
+            "{}/services/data/{}/sobjects/{}/",
+            self.instance_url,
+            self.api_version,
+            &obj.sobjecttype.api_name
+        );
         let result: CreateResult = self.client.get(&request_url).send()?.json()?;
 
         if result.success {
