@@ -46,6 +46,7 @@ impl fmt::Display for SalesforceId {
     }
 }
 
+#[derive(Debug)]
 pub enum FieldValue {
     Integer(i64),
     Number(f64),
@@ -57,6 +58,7 @@ pub enum FieldValue {
     Reference(SalesforceId)
 }
 
+#[derive(Debug)]
 pub struct SObject {
     pub id: Option<SalesforceId>,
     pub sobjecttype: Rc<SObjectType>,
@@ -64,8 +66,8 @@ pub struct SObject {
 }
 
 impl SObject {
-    pub fn new(id: Option<SalesforceId>, sobjecttype: Rc<SObjectType>, fields: HashMap<String, FieldValue>) -> SObject {
-        SObject { id, sobjecttype, fields }
+    pub fn new(id: Option<SalesforceId>, sobjecttype: &Rc<SObjectType>, fields: HashMap<String, FieldValue>) -> SObject {
+        SObject { id, sobjecttype: Rc::clone(sobjecttype), fields }
     }
 
     pub fn put(&mut self, key: &str, val: FieldValue) {
@@ -77,6 +79,7 @@ impl SObject {
     }
 }
 
+#[derive(Debug)]
 pub struct SObjectType {
     pub api_name: String
 }

@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::error::Error;
 use std::rc::Rc;
+use std::cell::RefCell;
 
 use super::data::{SalesforceId, SObject, SObjectType, FieldValue};
 use super::errors::SalesforceError;
@@ -18,22 +19,23 @@ use serde_json::Value;
 
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct QueryResult {
+    total_size: usize,
     done: bool,
     records: Vec<serde_json::Value>,
-    totalSize: usize,
-    nextRecordsUrl: Option<String>,
+    next_records_url: Option<String>,
 }
 
 pub struct QueryIterator<'a> {
     result: QueryResult,
     conn: &'a Connection,
-    sobjecttype: Rc<SObjectType>,
+    sobjecttype: &'a Rc<SObjectType>,
     index: usize,
 }
 
 impl QueryIterator<'_> {
-    fn new<'a>(result: QueryResult, conn: &'a Connection, sobjecttype: Rc<SObjectType>) -> QueryIterator<'a> {
+    fn new<'a>(result: QueryResult, conn: &'a Connection, sobjecttype: &'a Rc<SObjectType>) -> QueryIterator<'a> {
         QueryIterator {
             result,
             conn,
@@ -47,13 +49,13 @@ impl Iterator for QueryIterator<'_> {
     type Item = Result<SObject, Box<dyn Error>>;
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.result.totalSize, Some(self.result.totalSize))
+        (self.result.total_size, Some(self.result.total_size))
     }
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index == self.result.records.len() && !self.result.done {
             // Attempt to fetch the next block of records.
-            if let Some(next_url) = &self.result.nextRecordsUrl {
+            if let Some(next_url) = &self.result.next_records_url {
                 let request_url = format!("{}/{}", self.conn.instance_url, next_url);
                 self.result = self.conn.client.get(&request_url)
                     .send().unwrap()
@@ -65,10 +67,9 @@ impl Iterator for QueryIterator<'_> {
         if self.index < self.result.records.len() {
             self.index += 1;
 
-            Some(SObject::from_query_result(
+            Some(SObject::from_json(
                 &self.result.records[self.index - 1],
-                Rc::clone(&self.sobjecttype),
-                self.conn
+                self.sobjecttype
             ))    
         } else {
             None
@@ -78,41 +79,46 @@ impl Iterator for QueryIterator<'_> {
 
 impl ExactSizeIterator for QueryIterator<'_> {
     fn len(&self) -> usize {
-        self.result.totalSize
+        self.result.total_size
     }
 }
 
 pub struct Connection {
-    sid: String,
     instance_url: String,
     api_version: String,
-    sobject_types: HashMap<String, Rc<SObjectType>>,
+    sobject_types: RefCell<HashMap<String, Rc<SObjectType>>>,
     client: Client
 }
 
 impl Connection {
-    pub fn new(sid: &str, api_version: &str, sandbox: bool) -> Result<Connection, Box<dyn Error>> {
+    pub fn new(sid: &str, instance_url: &str, api_version: &str) -> Result<Connection, Box<dyn Error>> {
         let mut headers = header::HeaderMap::new();
 
-        headers.insert(header::AUTHORIZATION, header::HeaderValue::from_str(sid)?);
+        headers.insert(
+            header::AUTHORIZATION,
+            header::HeaderValue::from_str(&format!("Bearer {}", sid))?
+        );
 
         Ok(Connection {
-            sid: sid.to_string(),
             api_version: api_version.to_string(),
-            instance_url: format!("https://{}.salesforce.com", if sandbox { "test" } else { "login" }),
-            sobject_types: HashMap::new(),
-            client: Client::builder()
-                .default_headers(headers)
-                .build()?
+            instance_url: instance_url.to_string(),
+            sobject_types: RefCell::new(HashMap::new()),
+            client: Client::builder().default_headers(headers).build()?
         })
     }
 
-    pub fn get_type(&mut self, type_name: &str) -> Option<&Rc<SObjectType>> {
-        if !self.sobject_types.contains_key(type_name) {
-            self.sobject_types.insert(type_name.to_string(), Rc::new(SObjectType { api_name: type_name.to_string()} ));
+    pub fn get_type(&self, type_name: &str) -> Option<Rc<SObjectType>> {
+
+        if !self.sobject_types.borrow().contains_key(type_name) {
+            self.sobject_types.borrow_mut().insert(
+                type_name.to_string(), Rc::new(SObjectType { api_name: type_name.to_string()} )
+            );
         }
 
-        self.sobject_types.get(type_name)
+        match self.sobject_types.borrow().get(type_name) {
+            Some(rc) => Some(Rc::clone(rc)),
+            None => None
+        }
     }
 
     pub fn create(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
@@ -165,26 +171,38 @@ impl Connection {
         unimplemented!();
     }
 
-    pub fn query(&self, sobjecttype: Rc<SObjectType>, query: &str) -> Result<QueryIterator, Box<dyn Error>> {
+    fn execute_query<'a>(&'a self, sobjecttype: &'a Rc<SObjectType>, query: &str, endpoint: &str) -> Result<QueryIterator<'a>, Box<dyn Error>> {
         let request_url = format!(
-            "{}/services/data/{}/query",
+            "{}/services/data/{}/{}/",
             self.instance_url,
-            self.api_version
+            self.api_version,
+            endpoint
         );
-        let result: QueryResult = self.client.get(&request_url)
-            .query(&["query", query])
-            .send()?
-            .json()?;
+        let result: QueryResult = self.client.get(&request_url).query(&[("q", query)]).send()?.json()?;
 
-        Ok(QueryIterator::new(result, self, Rc::clone(&sobjecttype)))
+        Ok(QueryIterator::new(result, self, sobjecttype))
     }
 
-    pub fn query_all(&self, query: &str) -> Result<QueryIterator, Box<dyn Error>> {
-        unimplemented!();
+    pub fn query<'a>(&'a self, sobjecttype: &'a Rc<SObjectType>, query: &str) -> Result<QueryIterator<'a>, Box<dyn Error>> {
+        self.execute_query(sobjecttype, query, "query")
     }
 
-    pub fn retrieve(&self, id: &SalesforceId, fields: &Vec<String>) -> Result<SObject, Box<dyn Error>> {
-        unimplemented!();
+    pub fn query_all<'a>(&'a self, sobjecttype: &'a Rc<SObjectType>, query: &str) -> Result<QueryIterator<'a>, Box<dyn Error>> {
+        self.execute_query(sobjecttype, query, "queryAll")
+    }
+
+    pub fn retrieve(&self, id: &SalesforceId, sobjecttype: &Rc<SObjectType>, fields: &Vec<String>) -> Result<SObject, Box<dyn Error>> {
+        let request_url = format!(
+            "{}/services/data/{}/sobjects/{}/{}/",
+            self.instance_url,
+            self.api_version,
+            sobjecttype.api_name,
+            id
+        );
+        SObject::from_json(
+            &self.client.get(&request_url).send()?.json()?,
+            sobjecttype
+        )
     }
 
     pub fn retrieves(&self, ids: &Vec<SalesforceId>, fields: &Vec<String>) -> Result<Vec<SObject>, Box<dyn Error>> {
@@ -213,8 +231,10 @@ impl Error for CreateResult {
 }
 
 impl SObject {
-    fn from_query_result(value: &serde_json::Value, sobjecttype: Rc<SObjectType>, conn: &Connection) -> Result<SObject, Box<dyn Error>> {
-        let mut ret = SObject::new(None, Rc::clone(&sobjecttype), HashMap::new());
+    fn from_json(value: &serde_json::Value, sobjecttype: &Rc<SObjectType>) -> Result<SObject, Box<dyn Error>> {
+        let mut ret = SObject::new(None, sobjecttype, HashMap::new());
+
+        println!("JSON: {:?}", value);
 
         if let Value::Object(content) = value {
             for k in content.keys() {
@@ -226,7 +246,7 @@ impl SObject {
                 }
             }
         } else {
-            panic!("Query result data is not in expected format");
+            return Err(Box::new(SalesforceError::GeneralError("Invalid record JSON".to_string())))
         }
 
         Ok(ret)
