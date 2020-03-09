@@ -1,22 +1,21 @@
+extern crate reqwest;
 extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
-extern crate reqwest;
 
-use std::collections::HashMap;
-use std::fmt;
-use std::error::Error;
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::error::Error;
+use std::fmt;
+use std::rc::Rc;
 
-use super::data::{SalesforceId, SObject, SObjectType, FieldValue, SObjectDescribe, SoapType};
+use super::data::{FieldValue, SObject, SObjectDescribe, SObjectType, SalesforceId, SoapType};
 use super::errors::SalesforceError;
 
 use reqwest::blocking::Client;
 use reqwest::header;
 use serde_derive::Deserialize;
 use serde_json::Value;
-
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,12 +34,16 @@ pub struct QueryIterator<'a> {
 }
 
 impl QueryIterator<'_> {
-    fn new<'a>(result: QueryResult, conn: &'a Connection, sobjecttype: &'a Rc<SObjectType>) -> QueryIterator<'a> {
+    fn new<'a>(
+        result: QueryResult,
+        conn: &'a Connection,
+        sobjecttype: &'a Rc<SObjectType>,
+    ) -> QueryIterator<'a> {
         QueryIterator {
             result,
             conn,
             sobjecttype,
-            index: 0
+            index: 0,
         }
     }
 }
@@ -57,9 +60,14 @@ impl Iterator for QueryIterator<'_> {
             // Attempt to fetch the next block of records.
             if let Some(next_url) = &self.result.next_records_url {
                 let request_url = format!("{}/{}", self.conn.instance_url, next_url);
-                self.result = self.conn.client.get(&request_url)
-                    .send().unwrap()
-                    .json().unwrap(); // FIXME: better error propagation.
+                self.result = self
+                    .conn
+                    .client
+                    .get(&request_url)
+                    .send()
+                    .unwrap()
+                    .json()
+                    .unwrap(); // FIXME: better error propagation.
                 self.index = 0;
             }
         }
@@ -69,8 +77,8 @@ impl Iterator for QueryIterator<'_> {
 
             Some(SObject::from_json(
                 &self.result.records[self.index - 1],
-                self.sobjecttype
-            ))    
+                self.sobjecttype,
+            ))
         } else {
             None
         }
@@ -87,23 +95,27 @@ pub struct Connection {
     instance_url: String,
     api_version: String,
     sobject_types: RefCell<HashMap<String, Rc<SObjectType>>>,
-    client: Client
+    client: Client,
 }
 
 impl Connection {
-    pub fn new(sid: &str, instance_url: &str, api_version: &str) -> Result<Connection, Box<dyn Error>> {
+    pub fn new(
+        sid: &str,
+        instance_url: &str,
+        api_version: &str,
+    ) -> Result<Connection, Box<dyn Error>> {
         let mut headers = header::HeaderMap::new();
 
         headers.insert(
             header::AUTHORIZATION,
-            header::HeaderValue::from_str(&format!("Bearer {}", sid))?
+            header::HeaderValue::from_str(&format!("Bearer {}", sid))?,
         );
 
         Ok(Connection {
             api_version: api_version.to_string(),
             instance_url: instance_url.to_string(),
             sobject_types: RefCell::new(HashMap::new()),
-            client: Client::builder().default_headers(headers).build()?
+            client: Client::builder().default_headers(headers).build()?,
         })
     }
 
@@ -112,27 +124,26 @@ impl Connection {
             // Pull the Describe information for this sObject
             let request_url = format!(
                 "{}/services/data/{}/sobjects/{}/describe",
-                self.instance_url,
-                self.api_version,
-                type_name
+                self.instance_url, self.api_version, type_name
             );
             let describe: SObjectDescribe = self.client.get(&request_url).send()?.json()?;
-    
             self.sobject_types.borrow_mut().insert(
                 type_name.to_string(),
-                Rc::new(SObjectType::new(type_name.to_string(), describe))
+                Rc::new(SObjectType::new(type_name.to_string(), describe)),
             );
         }
 
         match self.sobject_types.borrow().get(type_name) {
             Some(rc) => Ok(Rc::clone(rc)),
-            None => Err(Box::new(SalesforceError::GeneralError("sObject Type not found".to_string())))
+            None => Err(Box::new(SalesforceError::GeneralError(
+                "sObject Type not found".to_string(),
+            ))),
         }
     }
 
     pub fn create(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
         if obj.get_id().is_some() {
-            return Err(Box::new(SalesforceError::CreateExistingRecord()))
+            return Err(Box::new(SalesforceError::CreateExistingRecord()));
         }
 
         let request_url = format!(
@@ -141,7 +152,9 @@ impl Connection {
             self.api_version,
             obj.sobjecttype.get_api_name()
         );
-        let result: CreateResult = self.client.post(&request_url)
+        let result: CreateResult = self
+            .client
+            .post(&request_url)
             .json(&obj.to_json())
             .send()?
             .json()?;
@@ -151,12 +164,12 @@ impl Connection {
 
             Ok(())
         } else {
-            Err(Box::new(result)) 
+            Err(Box::new(result))
         }
     }
 
     pub fn update(&self, obj: &SObject) -> Result<(), Box<dyn Error>> {
-       unimplemented!(); 
+        unimplemented!();
     }
 
     pub fn upsert(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
@@ -183,27 +196,48 @@ impl Connection {
         unimplemented!();
     }
 
-    fn execute_query<'a>(&'a self, sobjecttype: &'a Rc<SObjectType>, query: &str, endpoint: &str) -> Result<QueryIterator<'a>, Box<dyn Error>> {
+    fn execute_query<'a>(
+        &'a self,
+        sobjecttype: &'a Rc<SObjectType>,
+        query: &str,
+        endpoint: &str,
+    ) -> Result<QueryIterator<'a>, Box<dyn Error>> {
         let request_url = format!(
             "{}/services/data/{}/{}/",
-            self.instance_url,
-            self.api_version,
-            endpoint
+            self.instance_url, self.api_version, endpoint
         );
-        let result: QueryResult = self.client.get(&request_url).query(&[("q", query)]).send()?.json()?;
+        let result: QueryResult = self
+            .client
+            .get(&request_url)
+            .query(&[("q", query)])
+            .send()?
+            .json()?;
 
         Ok(QueryIterator::new(result, self, sobjecttype))
     }
 
-    pub fn query<'a>(&'a self, sobjecttype: &'a Rc<SObjectType>, query: &str) -> Result<QueryIterator<'a>, Box<dyn Error>> {
+    pub fn query<'a>(
+        &'a self,
+        sobjecttype: &'a Rc<SObjectType>,
+        query: &str,
+    ) -> Result<QueryIterator<'a>, Box<dyn Error>> {
         self.execute_query(sobjecttype, query, "query")
     }
 
-    pub fn query_all<'a>(&'a self, sobjecttype: &'a Rc<SObjectType>, query: &str) -> Result<QueryIterator<'a>, Box<dyn Error>> {
+    pub fn query_all<'a>(
+        &'a self,
+        sobjecttype: &'a Rc<SObjectType>,
+        query: &str,
+    ) -> Result<QueryIterator<'a>, Box<dyn Error>> {
         self.execute_query(sobjecttype, query, "queryAll")
     }
 
-    pub fn retrieve(&self, id: &SalesforceId, sobjecttype: &Rc<SObjectType>, fields: &Vec<String>) -> Result<SObject, Box<dyn Error>> {
+    pub fn retrieve(
+        &self,
+        id: &SalesforceId,
+        sobjecttype: &Rc<SObjectType>,
+        fields: &Vec<String>,
+    ) -> Result<SObject, Box<dyn Error>> {
         let request_url = format!(
             "{}/services/data/{}/sobjects/{}/{}/",
             self.instance_url,
@@ -211,13 +245,14 @@ impl Connection {
             sobjecttype.get_api_name(),
             id
         );
-        SObject::from_json(
-            &self.client.get(&request_url).send()?.json()?,
-            sobjecttype
-        )
+        SObject::from_json(&self.client.get(&request_url).send()?.json()?, sobjecttype)
     }
 
-    pub fn retrieves(&self, ids: &Vec<SalesforceId>, fields: &Vec<String>) -> Result<Vec<SObject>, Box<dyn Error>> {
+    pub fn retrieves(
+        &self,
+        ids: &Vec<SalesforceId>,
+        fields: &Vec<String>,
+    ) -> Result<Vec<SObject>, Box<dyn Error>> {
         unimplemented!();
     }
 }
@@ -226,7 +261,7 @@ impl Connection {
 struct CreateResult {
     id: String,
     errors: Vec<String>,
-    success: bool
+    success: bool,
 }
 
 impl fmt::Display for CreateResult {
@@ -239,42 +274,85 @@ impl fmt::Display for CreateResult {
     }
 }
 
-impl Error for CreateResult {
-}
+impl Error for CreateResult {}
 
 impl FieldValue {
     fn to_json(&self) -> serde_json::Value {
         match &self {
-            FieldValue::Integer(i) => serde_json::Value::Number(serde_json::Number::from_f64(*i as f64).unwrap()),
-            FieldValue::Double(i) => serde_json::Value::Number(serde_json::Number::from_f64(*i).unwrap()),
+            FieldValue::Integer(i) => {
+                serde_json::Value::Number(serde_json::Number::from_f64(*i as f64).unwrap())
+            }
+            FieldValue::Double(i) => {
+                serde_json::Value::Number(serde_json::Number::from_f64(*i).unwrap())
+            }
             FieldValue::Boolean(i) => serde_json::Value::Bool(*i),
             FieldValue::String(i) => serde_json::Value::String(i.clone()),
             FieldValue::DateTime(i) => serde_json::Value::String(i.clone()),
             FieldValue::Time(i) => serde_json::Value::String(i.clone()),
             FieldValue::Date(i) => serde_json::Value::String(i.clone()),
-            FieldValue::Id(i) => serde_json::Value::String(i.to_string())
+            FieldValue::Id(i) => serde_json::Value::String(i.to_string()),
         }
     }
 
-    fn from_json(value: &serde_json::Value, soap_type: SoapType) -> Result<FieldValue, Box<dyn Error>> {
+    fn from_json(
+        value: &serde_json::Value,
+        soap_type: SoapType,
+    ) -> Result<FieldValue, Box<dyn Error>> {
         match soap_type {
-            SoapType::Address | SoapType::Any | SoapType::Blob => { panic!("Not supported") },
-            SoapType::Boolean => { if let serde_json::Value::Bool(b) = value { return Ok(FieldValue::Boolean(*b)); } },
-            SoapType::Date => { if let serde_json::Value::String(b) = value { return Ok(FieldValue::Date(b.to_string())); } },
-            SoapType::DateTime => { if let serde_json::Value::String(b) = value { return Ok(FieldValue::DateTime(b.to_string())); } },
-            SoapType::Time => { if let serde_json::Value::String(b) = value { return Ok(FieldValue::Time(b.to_string())); } },
-            SoapType::Double => { if let serde_json::Value::Number(b) = value { return Ok(FieldValue::Double(b.as_f64().unwrap())); } },
-            SoapType::Integer => { if let serde_json::Value::Number(b) = value { return Ok(FieldValue::Integer(b.as_i64().unwrap())); } },
-            SoapType::Id => { if let serde_json::Value::String(b) = value { return Ok(FieldValue::Id(SalesforceId::new(b)?)); } },
-            SoapType::String => { if let serde_json::Value::String(b) = value { return Ok(FieldValue::String(b.to_string())); } }
+            SoapType::Address | SoapType::Any | SoapType::Blob => panic!("Not supported"),
+            SoapType::Boolean => {
+                if let serde_json::Value::Bool(b) = value {
+                    return Ok(FieldValue::Boolean(*b));
+                }
+            }
+            SoapType::Date => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::Date(b.to_string()));
+                }
+            }
+            SoapType::DateTime => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::DateTime(b.to_string()));
+                }
+            }
+            SoapType::Time => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::Time(b.to_string()));
+                }
+            }
+            SoapType::Double => {
+                if let serde_json::Value::Number(b) = value {
+                    return Ok(FieldValue::Double(b.as_f64().unwrap()));
+                }
+            }
+            SoapType::Integer => {
+                if let serde_json::Value::Number(b) = value {
+                    return Ok(FieldValue::Integer(b.as_i64().unwrap()));
+                }
+            }
+            SoapType::Id => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::Id(SalesforceId::new(b)?));
+                }
+            }
+            SoapType::String => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::String(b.to_string()));
+                }
+            }
         }
 
-        return Err(Box::new(SalesforceError::SchemaError("Unable to convert value from JSON".to_string())));
+        return Err(Box::new(SalesforceError::SchemaError(
+            "Unable to convert value from JSON".to_string(),
+        )));
     }
 }
 
 impl SObject {
-    fn from_json(value: &serde_json::Value, sobjecttype: &Rc<SObjectType>) -> Result<SObject, Box<dyn Error>> {
+    fn from_json(
+        value: &serde_json::Value,
+        sobjecttype: &Rc<SObjectType>,
+    ) -> Result<SObject, Box<dyn Error>> {
         let mut ret = SObject::new(sobjecttype);
 
         if let Value::Object(content) = value {
@@ -283,11 +361,16 @@ impl SObject {
                 if k != "attributes" {
                     let describe = sobjecttype.get_describe().get_field(k).unwrap();
 
-                    ret.put(k, FieldValue::from_json(value.get(k).unwrap(), describe.soap_type)?)?;
+                    ret.put(
+                        k,
+                        FieldValue::from_json(value.get(k).unwrap(), describe.soap_type)?,
+                    )?;
                 }
             }
         } else {
-            return Err(Box::new(SalesforceError::GeneralError("Invalid record JSON".to_string())))
+            return Err(Box::new(SalesforceError::GeneralError(
+                "Invalid record JSON".to_string(),
+            )));
         }
 
         Ok(ret)

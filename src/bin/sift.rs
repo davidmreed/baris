@@ -1,7 +1,7 @@
 use std::env;
 use std::error::Error;
 
-use oxideforce::{Connection, SObject, FieldValue};
+use oxideforce::{Connection, FieldValue, SObject};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let sid = env::var("SESSION_ID")?;
@@ -14,8 +14,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         "query" => {
             for sobj in conn.query(&sobjecttype, &args[3])? {
                 println!("I received sObject {:?}", sobj?.fields);
-            }        
-        },
+            }
+        }
         "create" => {
             let mut sobj = SObject::new(&sobjecttype);
 
