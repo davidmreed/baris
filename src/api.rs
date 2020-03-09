@@ -9,7 +9,7 @@ use std::error::Error;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use super::data::{SalesforceId, SObject, SObjectType, FieldValue, SObjectDescribe};
+use super::data::{SalesforceId, SObject, SObjectType, FieldValue, SObjectDescribe, SoapType};
 use super::errors::SalesforceError;
 
 use reqwest::blocking::Client;
@@ -119,7 +119,8 @@ impl Connection {
             let describe: SObjectDescribe = self.client.get(&request_url).send()?.json()?;
     
             self.sobject_types.borrow_mut().insert(
-                type_name.to_string(), Rc::new(SObjectType { api_name: type_name.to_string(), describe: describe } )
+                type_name.to_string(),
+                Rc::new(SObjectType::new(type_name.to_string(), describe))
             );
         }
 
@@ -140,10 +141,13 @@ impl Connection {
             self.api_version,
             obj.sobjecttype.get_api_name()
         );
-        let result: CreateResult = self.client.get(&request_url).send()?.json()?;
+        let result: CreateResult = self.client.post(&request_url)
+            .json(&obj.to_json())
+            .send()?
+            .json()?;
 
         if result.success {
-            obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?));
+            obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?))?;
 
             Ok(())
         } else {
@@ -238,23 +242,64 @@ impl fmt::Display for CreateResult {
 impl Error for CreateResult {
 }
 
+impl FieldValue {
+    fn to_json(&self) -> serde_json::Value {
+        match &self {
+            FieldValue::Integer(i) => serde_json::Value::Number(serde_json::Number::from_f64(*i as f64).unwrap()),
+            FieldValue::Double(i) => serde_json::Value::Number(serde_json::Number::from_f64(*i).unwrap()),
+            FieldValue::Boolean(i) => serde_json::Value::Bool(*i),
+            FieldValue::String(i) => serde_json::Value::String(i.clone()),
+            FieldValue::DateTime(i) => serde_json::Value::String(i.clone()),
+            FieldValue::Time(i) => serde_json::Value::String(i.clone()),
+            FieldValue::Date(i) => serde_json::Value::String(i.clone()),
+            FieldValue::Id(i) => serde_json::Value::String(i.to_string())
+        }
+    }
+
+    fn from_json(value: &serde_json::Value, soap_type: SoapType) -> Result<FieldValue, Box<dyn Error>> {
+        match soap_type {
+            SoapType::Address | SoapType::Any | SoapType::Blob => { panic!("Not supported") },
+            SoapType::Boolean => { if let serde_json::Value::Bool(b) = value { return Ok(FieldValue::Boolean(*b)); } },
+            SoapType::Date => { if let serde_json::Value::String(b) = value { return Ok(FieldValue::Date(b.to_string())); } },
+            SoapType::DateTime => { if let serde_json::Value::String(b) = value { return Ok(FieldValue::DateTime(b.to_string())); } },
+            SoapType::Time => { if let serde_json::Value::String(b) = value { return Ok(FieldValue::Time(b.to_string())); } },
+            SoapType::Double => { if let serde_json::Value::Number(b) = value { return Ok(FieldValue::Double(b.as_f64().unwrap())); } },
+            SoapType::Integer => { if let serde_json::Value::Number(b) = value { return Ok(FieldValue::Integer(b.as_i64().unwrap())); } },
+            SoapType::Id => { if let serde_json::Value::String(b) = value { return Ok(FieldValue::Id(SalesforceId::new(b)?)); } },
+            SoapType::String => { if let serde_json::Value::String(b) = value { return Ok(FieldValue::String(b.to_string())); } }
+        }
+
+        return Err(Box::new(SalesforceError::SchemaError("Unable to convert value from JSON".to_string())));
+    }
+}
+
 impl SObject {
     fn from_json(value: &serde_json::Value, sobjecttype: &Rc<SObjectType>) -> Result<SObject, Box<dyn Error>> {
-        let mut ret = SObject::new(sobjecttype, HashMap::new());
+        let mut ret = SObject::new(sobjecttype);
 
         if let Value::Object(content) = value {
             for k in content.keys() {
-                match content.get(k) {
-                    Some(Value::Bool(b)) => ret.put(k, FieldValue::Boolean(*b)),
-                    Some(Value::String(s)) => ret.put(k, FieldValue::String(s.clone())),
-                    Some(Value::Number(n)) => ret.put(k, FieldValue::Double(n.as_f64().unwrap())),
-                    _ => Ok(())
-                };
+                // Get the describe for this field.
+                if k != "attributes" {
+                    let describe = sobjecttype.get_describe().get_field(k).unwrap();
+
+                    ret.put(k, FieldValue::from_json(value.get(k).unwrap(), describe.soap_type)?)?;
+                }
             }
         } else {
             return Err(Box::new(SalesforceError::GeneralError("Invalid record JSON".to_string())))
         }
 
         Ok(ret)
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+
+        for (k, v) in self.fields.iter() {
+            map.insert(k.to_string(), v.to_json());
+        }
+
+        serde_json::Value::Object(map)
     }
 }

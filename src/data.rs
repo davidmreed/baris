@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::error::Error;
@@ -117,12 +116,6 @@ impl FieldValue {
             FieldValue::Id(_) => SoapType::Id
         }
     }
-
-
-
-
-
-
 }
 
 #[derive(Debug)]
@@ -132,8 +125,8 @@ pub struct SObject {
 }
 
 impl SObject {
-    pub fn new(sobjecttype: &Rc<SObjectType>, fields: HashMap<String, FieldValue>) -> SObject {
-        SObject { sobjecttype: Rc::clone(sobjecttype), fields }
+    pub fn new(sobjecttype: &Rc<SObjectType>) -> SObject {
+        SObject { sobjecttype: Rc::clone(sobjecttype), fields: HashMap::new() }
     }
 
     pub fn put(&mut self, key: &str, val: FieldValue) -> Result<(), Box<dyn Error>> {
@@ -151,10 +144,11 @@ impl SObject {
         if describe.soap_type != val.get_soap_type() {
             Err(Box::new(SalesforceError::SchemaError(
                 format!(
-                    "Wrong type of value ({:?}) for field {}.{}",
+                    "Wrong type of value ({:?}) for field {}.{} (type {:?})",
                     val.get_soap_type(),
                     self.sobjecttype.get_api_name(),
-                    key
+                    key,
+                    describe.soap_type
                 )
             )))
         } else {
@@ -187,6 +181,10 @@ pub struct SObjectType {
 }
 
 impl SObjectType {
+    pub fn new(api_name: String, describe: SObjectDescribe) -> SObjectType {
+        SObjectType { api_name, describe }
+    }
+
     pub fn get_describe(&self) -> &SObjectDescribe {
         &self.describe
     }
@@ -208,125 +206,135 @@ pub struct PicklistValueDescribe {
     active: bool,
     default_value: bool,
     label: String,
-    validFor: String, // fixme: probably a new type
+    valid_for: Option<String>, // fixme: probably a new type
     value: String
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Copy, Clone)]
 pub enum SoapType {
-    #[serde(rename="anytype")]
+    #[serde(rename="urn:address")]
+    Address,
+    #[serde(rename="xsd:anyType")]
     Any,
-    #[serde(rename="base64binary")]
+    #[serde(rename="xsd:base64binary")]
     Blob,
+    #[serde(rename="xsd:boolean")]
     Boolean,
+    #[serde(rename="xsd:date")]
     Date,
+    #[serde(rename="xsd:dateTime")]
     DateTime,
+    #[serde(rename="xsd:double")]
     Double,
+    #[serde(rename="tns:ID")]
     Id,
+    #[serde(rename="xsd:int")]
     Integer,
+    #[serde(rename="xsd:string")]
     String,
+    #[serde(rename="xsd:time")]
     Time
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FieldDescribe {
-    aggregatable: bool,
-    ai_prediction_field: bool,
-    auto_number: bool,
-    byte_length: u16,
-    calculated: bool,
-    calculated_formula: Option<String>,
-    cascade_delete: bool,
-    case_sensitive: bool,
-    compound_field_name: Option<String>,
-    controller_name: Option<String>,
-    createable: bool,
-    custom: bool,
-    default_value: Option<String>,
-    default_value_formula: Option<String>,
-    defaulted_on_create: bool,
-    dependent_picklist: bool,
-    deprecated_and_hidden: bool,
-    digits: u16,
-    display_location_in_decimal: bool,
-    encrypted: bool,
-    external_id: bool,
-    //extraTypeInfo: null
-    filterable: bool,
+    pub aggregatable: bool,
+    pub ai_prediction_field: bool,
+    pub auto_number: bool,
+    pub byte_length: u32,
+    pub calculated: bool,
+    pub calculated_formula: Option<String>,
+    pub cascade_delete: bool,
+    pub case_sensitive: bool,
+    pub compound_field_name: Option<String>,
+    pub controller_name: Option<String>,
+    pub createable: bool,
+    pub custom: bool,
+    pub default_value: Option<bool>,
+    pub default_value_formula: Option<String>,
+    pub defaulted_on_create: bool,
+    pub dependent_picklist: bool,
+    pub deprecated_and_hidden: bool,
+    pub digits: u16,
+    pub display_location_in_decimal: bool,
+    pub encrypted: bool,
+    pub external_id: bool,
+    //pub extraTypeInfo: null
+    pub filterable: bool,
     //filteredLookupInfo: null
-    formula_treat_null_number_as_zero: bool,
-    groupable: bool,
-    high_scale_number: bool,
-    html_formatted: bool,
-    id_lookup: bool,
-    inline_help_text: Option<String>,
-    label: String,
-    length: u16,
-    //mask: null
-    //maskType: null
-    name: String,
-    name_field: bool,
-    name_pointing: bool,
-    nillable: bool,
-    permissionable: bool,
-    picklist_values: Vec<PicklistValueDescribe>,
-    polymorphic_foreign_key: bool,
-    precision: u16,
-    query_by_distance: bool,
-    reference_target_field: Option<String>,
-    reference_to: Vec<String>,
-    relationship_name: Option<String>,
-    relationship_order: Option<u16>,
-    restricted_delete: bool,
-    restricted_picklist: bool,
-    scale: u16,
-    search_prefilterable: bool,
-    soap_type: SoapType,
-    sortable: bool,
+    pub formula_treat_null_number_as_zero: bool,
+    pub groupable: bool,
+    pub high_scale_number: bool,
+    pub html_formatted: bool,
+    pub id_lookup: bool,
+    pub inline_help_text: Option<String>,
+    pub label: String,
+    pub length: u32,
+    //pub mask: null
+    //pub maskType: null
+    pub name: String,
+    pub name_field: bool,
+    pub name_pointing: bool,
+    pub nillable: bool,
+    pub permissionable: bool,
+    pub picklist_values: Vec<PicklistValueDescribe>,
+    pub polymorphic_foreign_key: bool,
+    pub precision: u16,
+    pub query_by_distance: bool,
+    pub reference_target_field: Option<String>,
+    pub reference_to: Vec<String>,
+    pub relationship_name: Option<String>,
+    pub relationship_order: Option<u16>,
+    pub restricted_delete: bool,
+    pub restricted_picklist: bool,
+    pub scale: u16,
+    pub search_prefilterable: bool,
+    pub soap_type: SoapType,
+    pub sortable: bool,
     #[serde(rename = "type")]
-    field_type: String,
-    unique: bool,
-    updateable: bool,
-    write_requires_master_read: bool
+    pub field_type: String,
+    pub unique: bool,
+    pub updateable: bool,
+    pub write_requires_master_read: bool
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChildRelationshipDescribe {
-    cascade_delete: bool,
+    pub cascade_delete: bool,
     #[serde(rename="childSObject")]
-    child_sobject: String,
-    deprecated_and_hidden: bool,
-    field: String,
-    junction_id_list_names: Option<Vec<String>>,
-    junction_reference_to: Option<Vec<String>>,
-    relationship_name: String,
-    restricted_delete: bool
+    pub child_sobject: String,
+    pub deprecated_and_hidden: bool,
+    pub field: String,
+    pub junction_id_list_names: Option<Vec<String>>,
+    pub junction_reference_to: Option<Vec<String>>,
+    pub relationship_name: String,
+    pub restricted_delete: bool
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordTypeDescribe {
-    active: bool,
-    available: bool,
-    default_record_type_mapping: bool,
-    developer_name: String,
-    master: bool,
-    name: String,
-    record_type_id: SalesforceId,
-    //urls: Vec<RecordTypeURLDescribe>
+    pub active: bool,
+    pub available: bool,
+    pub default_record_type_mapping: bool,
+    pub developer_name: String,
+    pub master: bool,
+    pub name: String,
+    pub record_type_id: SalesforceId,
+    pub urls: HashMap<String, String>
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ScopeDescribe {
-    label: String,
-    name: String
+    pub label: String,
+    pub name: String
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SObjectDescribe<'a> {
+pub struct SObjectDescribe {
     //action_overrides: Vec<ActionOverrideDescribe>,
     pub activateable: bool,
     pub compact_layoutable: bool,
@@ -368,31 +376,20 @@ pub struct SObjectDescribe<'a> {
     pub undeletable: bool,
     pub updateable: bool,
     pub urls: HashMap<String, String>,
-    #[serde(skip)]
-    #[serde(default = "SObjectDescribe::default_refcell_hashmap")]
-    field_map: RefCell<HashMap<String, &'a FieldDescribe>>
 }
 
 
-impl SObjectDescribe<'a> {
-    fn default_refcell_hashmap() -> RefCell<HashMap<String, &'a FieldDescribe>> {
-        RefCell::new(HashMap::new())
-    }
-    
-    fn populate_field_map(&self) {
-        let mut field_map = self.field_map.borrow_mut();
+impl SObjectDescribe {
+    pub fn get_field(&self, api_name: &str) -> Option<&FieldDescribe> {
+        let target = api_name.to_lowercase();
 
         for f in self.fields.iter() {
-            field_map.insert(f.name, f);
+            if f.name.to_lowercase() == target {
+                return Some(f)
+            }
         }
-    }
 
-    pub fn get_field(&self, api_name: &str) -> Option<&FieldDescribe> {
-        if self.field_map.borrow().len() == 0 {
-            self.populate_field_map();
-        }
-        
-        self.field_map.borrow().get(api_name)
+        None
     }
 }
 
