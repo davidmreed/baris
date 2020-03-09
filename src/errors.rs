@@ -5,6 +5,7 @@ use std::error::Error;
 pub enum SalesforceError {
     InvalidIdError(String),
     CreateExistingRecord(),
+    SchemaError(String),
     GeneralError(String)
 } 
 
@@ -13,7 +14,8 @@ impl fmt::Display for SalesforceError {
         match self {
             SalesforceError::InvalidIdError(id) => write!(f, "Invalid Salesforce Id: {}", id),
             SalesforceError::CreateExistingRecord() => write!(f, "Cannot create record with an Id"),
-            SalesforceError::GeneralError(err) => write!(f, "General Salesforce error: {}", err)
+            SalesforceError::GeneralError(err) => write!(f, "General Salesforce error: {}", err),
+            SalesforceError::SchemaError(err) => write!(f, "Schema error: {}", err)
         }
          
     }

@@ -9,7 +9,7 @@ use std::error::Error;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use super::data::{SalesforceId, SObject, SObjectType, FieldValue};
+use super::data::{SalesforceId, SObject, SObjectType, FieldValue, SObjectDescribe};
 use super::errors::SalesforceError;
 
 use reqwest::blocking::Client;
@@ -107,22 +107,30 @@ impl Connection {
         })
     }
 
-    pub fn get_type(&self, type_name: &str) -> Option<Rc<SObjectType>> {
-
+    pub fn get_type(&self, type_name: &str) -> Result<Rc<SObjectType>, Box<dyn Error>> {
         if !self.sobject_types.borrow().contains_key(type_name) {
+            // Pull the Describe information for this sObject
+            let request_url = format!(
+                "{}/services/data/{}/sobjects/{}/describe",
+                self.instance_url,
+                self.api_version,
+                type_name
+            );
+            let describe: SObjectDescribe = self.client.get(&request_url).send()?.json()?;
+    
             self.sobject_types.borrow_mut().insert(
-                type_name.to_string(), Rc::new(SObjectType { api_name: type_name.to_string()} )
+                type_name.to_string(), Rc::new(SObjectType { api_name: type_name.to_string(), describe: describe } )
             );
         }
 
         match self.sobject_types.borrow().get(type_name) {
-            Some(rc) => Some(Rc::clone(rc)),
-            None => None
+            Some(rc) => Ok(Rc::clone(rc)),
+            None => Err(Box::new(SalesforceError::GeneralError("sObject Type not found".to_string())))
         }
     }
 
     pub fn create(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
-        if obj.id.is_some() {
+        if obj.get_id().is_some() {
             return Err(Box::new(SalesforceError::CreateExistingRecord()))
         }
 
@@ -130,12 +138,12 @@ impl Connection {
             "{}/services/data/{}/sobjects/{}/",
             self.instance_url,
             self.api_version,
-            &obj.sobjecttype.api_name
+            obj.sobjecttype.get_api_name()
         );
         let result: CreateResult = self.client.get(&request_url).send()?.json()?;
 
         if result.success {
-            obj.id = Some(SalesforceId::new(&result.id)?);
+            obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?));
 
             Ok(())
         } else {
@@ -196,7 +204,7 @@ impl Connection {
             "{}/services/data/{}/sobjects/{}/{}/",
             self.instance_url,
             self.api_version,
-            sobjecttype.api_name,
+            sobjecttype.get_api_name(),
             id
         );
         SObject::from_json(
@@ -232,18 +240,16 @@ impl Error for CreateResult {
 
 impl SObject {
     fn from_json(value: &serde_json::Value, sobjecttype: &Rc<SObjectType>) -> Result<SObject, Box<dyn Error>> {
-        let mut ret = SObject::new(None, sobjecttype, HashMap::new());
-
-        println!("JSON: {:?}", value);
+        let mut ret = SObject::new(sobjecttype, HashMap::new());
 
         if let Value::Object(content) = value {
             for k in content.keys() {
                 match content.get(k) {
-                    Some(Value::Bool(b)) => ret.put(k, FieldValue::Checkbox(*b)),
-                    Some(Value::String(s)) => ret.put(k, FieldValue::Text(s.clone())),
-                    Some(Value::Number(n)) => ret.put(k, FieldValue::Number(n.as_f64().unwrap())),
-                    _ => {}
-                }
+                    Some(Value::Bool(b)) => ret.put(k, FieldValue::Boolean(*b)),
+                    Some(Value::String(s)) => ret.put(k, FieldValue::String(s.clone())),
+                    Some(Value::Number(n)) => ret.put(k, FieldValue::Double(n.as_f64().unwrap())),
+                    _ => Ok(())
+                };
             }
         } else {
             return Err(Box::new(SalesforceError::GeneralError("Invalid record JSON".to_string())))
