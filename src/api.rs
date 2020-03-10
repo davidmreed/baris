@@ -126,7 +126,8 @@ impl Connection {
                 "{}/services/data/{}/sobjects/{}/describe",
                 self.instance_url, self.api_version, type_name
             );
-            let describe: SObjectDescribe = self.client.get(&request_url).send()?.json()?;
+            let response = self.client.get(&request_url).send()?;
+            let describe: SObjectDescribe = response.json()?;
             self.sobject_types.borrow_mut().insert(
                 type_name.to_string(),
                 Rc::new(SObjectType::new(type_name.to_string(), describe)),

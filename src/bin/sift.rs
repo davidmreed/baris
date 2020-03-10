@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "create" => {
             let mut sobj = SObject::new(&sobjecttype);
 
-            sobj.put("Name", FieldValue::String("Test".to_string()))?;
+            sobj.put("Name", FieldValue::String(args[3].clone()))?;
             conn.create(&mut sobj)?;
 
             println!("Created {} {}", &args[1], sobj.get_id().unwrap());
