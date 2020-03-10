@@ -9,7 +9,7 @@ use serde_derive::Deserialize;
 use super::errors::SalesforceError;
 
 #[serde(try_from = "&str")]
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct SalesforceId {
     id: [u8; 18],
 }
@@ -49,6 +49,12 @@ impl TryFrom<&str> for SalesforceId {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         SalesforceId::new(value)
+    }
+}
+
+impl fmt::Debug for SalesforceId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", std::str::from_utf8(&self.id).unwrap())
     }
 }
 
