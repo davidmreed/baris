@@ -17,14 +17,108 @@ use reqwest::header;
 use serde_derive::Deserialize;
 use serde_json::Value;
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct QueryResult {
-    total_size: usize,
-    done: bool,
-    records: Vec<serde_json::Value>,
-    next_records_url: Option<String>,
+// Error Structures
+
+#[serde(rename_all = "camelCase")] 
+struct ApiError {
+    message: String,
+    error_code: String,
+    fields: Option<Vec<String>>
 }
+
+// DML Api Structures
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum DmlApiResult {
+    Error(Vec<ApiError>),
+    DmlResult {
+        id: Option<SalesforceId>,
+        errors: Vec<String>,
+        success: bool
+    }
+}
+
+impl fmt::Display for DmlApiResult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error(errors) => {
+                write!(
+                    f,
+                    "{}",
+                    errors.map(|&err| format!(
+                        "API error {}: {}. {}",
+                        err.error_code,
+                        err.message,
+                        if let Some(fields) = err.fields {
+                            fields.join("\n")
+                        } else {
+                            ""
+                        }
+                    )).join("\n")
+                )
+            },
+            DmlResult(result) => {
+                write!(
+                    f,
+                    "DML result: {} (id {}). {}",
+                    if result.success { "success" } else { "failure" },
+                    if result.id.is_some() { result.id.to_string() } else { "none" },
+                    if result.errors.is_some() { result.errors.unwrap().join("\n") } else { "" }
+                )
+            }
+        }
+    }
+}
+
+impl Error for DmlApiResult {}
+
+// Query API Structures
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(untagged)]
+enum QueryApiResult {
+    QueryResult {
+        total_size: usize,
+        done: bool,
+        records: Vec<serde_json::Value>,
+        next_records_url: Option<String>,
+    },
+    Error(Vec<ApiError>)
+}
+
+impl fmt::Display for QueryApiResult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error(errors) => {
+                write!(
+                    f,
+                    "{}",
+                    errors.map(|&err| format!(
+                        "API error {}: {}. {}",
+                        err.error_code,
+                        err.message,
+                        if let Some(fields) = err.fields {
+                            fields.join("\n")
+                        } else {
+                            ""
+                        }
+                    )).join("\n")
+                )
+            },
+            QueryResult(result) => {
+                write!(
+                    f,
+                    "Query result: {} total records",
+                    result.total_size
+                )
+            }
+        }
+    }
+}
+
+impl Error for QueryApiResult {}
 
 pub struct QueryIterator<'a> {
     result: QueryResult,
@@ -91,6 +185,8 @@ impl ExactSizeIterator for QueryIterator<'_> {
     }
 }
 
+// Connection Structures
+
 pub struct Connection {
     instance_url: String,
     api_version: String,
@@ -119,6 +215,17 @@ impl Connection {
         })
     }
 
+    fn<T> handle_response(res: reqwest::Response) -> Result<T, Box<ApiError>> {
+        if res.status().is_client_error() {
+            let error: SalesforceServerError = response.json()?;
+            return Err(Box::new(SalesforceError::RequestError(error)));
+        } else if res.status.is_server_error() {
+            return Err(Box::new(SalesforceError::ServerError(response.status.as_str().to_string())));
+        }
+
+        Ok(response.json()?)
+    }
+
     pub fn get_type(&self, type_name: &str) -> Result<Rc<SObjectType>, Box<dyn Error>> {
         if !self.sobject_types.borrow().contains_key(type_name) {
             // Pull the Describe information for this sObject
@@ -126,7 +233,8 @@ impl Connection {
                 "{}/services/data/{}/sobjects/{}/describe",
                 self.instance_url, self.api_version, type_name
             );
-            let response = self.client.get(&request_url).send()?;
+            let response = Connection::handle_response(self.client.get(&request_url).send()?)?;
+
             let describe: SObjectDescribe = response.json()?;
             self.sobject_types.borrow_mut().insert(
                 type_name.to_string(),
@@ -142,43 +250,84 @@ impl Connection {
         }
     }
 
+    fn make_result(&self, result: &DmlApiResult) -> Result<DmlApiResult, 
+
     pub fn create(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
+        // Validate preconditions
         if obj.get_id().is_some() {
             return Err(Box::new(SalesforceError::CreateExistingRecord()));
         }
 
+        // Send request
         let request_url = format!(
             "{}/services/data/{}/sobjects/{}/",
             self.instance_url,
             self.api_version,
             obj.sobjecttype.get_api_name()
         );
-        let result: CreateResult = self
-            .client
-            .post(&request_url)
-            .json(&obj.to_json())
-            .send()?
-            .json()?;
+        let result: DmlApiResult = Connection::handle_response(
+            self.client.post(&request_url).json(&obj.to_json()).send()?
+        )?.json()?;
 
-        if result.success {
-            obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?))?;
-
-            Ok(())
-        } else {
-            Err(Box::new(result))
-        }
+        // Handle results
+        // FIXME: we need to handle variants of the result object.
+        obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?))?;
+        Ok(())
     }
 
     pub fn update(&self, obj: &SObject) -> Result<(), Box<dyn Error>> {
-        unimplemented!();
+        // Validate preconditions
+        if obj.get_id().is_none() {
+            return Err(Box::new(SalesforceError::UpdateNonexistentRecord()));
+        }
+
+        // Send request
+        let request_url = format!(
+            "{}/services/data/{}/sobjects/{}/{}",
+            self.instance_url,
+            self.api_version,
+            obj.sobjecttype.get_api_name(),
+            obj.get_id().unwrap()
+        );
+        let result: DmlApiResult = Connection::handle_response(
+            self.client.patch(&request_url).json(&obj.to_json()).send()?
+        )?.json()?;
+
+        // Handle results
+        obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?))?;
+        Ok(())
     }
 
-    pub fn upsert(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
-        unimplemented!();
+    pub fn upsert(&self, obj: &mut SObject, external_id_field: &str) -> Result<(), Box<dyn Error>> {
+        // FIXME: validate that `external_id_field` is a real External Id/idlookup field
+        let request_url = format!(
+            "{}/services/data/{}/sobjects/{}/{}/{}",
+            self.instance_url,
+            self.api_version,
+            obj.sobjecttype.get_api_name(),
+            external_id_field,
+            obj.get(external_id_field).unwrap()
+        );
+        let result: DmlApiResult = Connection::handle_response(
+            self.client.patch(&request_url).json(&obj.to_json()).send()?
+        )?.json()?;
+        
+        obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?))?;
+        Ok(())
     }
 
     pub fn delete(&self, obj: SObject) -> Result<(), Box<dyn Error>> {
-        unimplemented!();
+        let request_url = format!(
+            "{}/services/data/{}/sobjects/{}/{}",
+            self.instance_url,
+            self.api_version,
+            obj.sobjecttype.get_api_name(),
+            obj.get_id().unwrap()
+        );
+        let result: DmlApiResult = Connection::handle_response(
+            self.client.delete(&request_url).send()?
+        )?.json()?;
+        Ok(())
     }
 
     pub fn creates(&self, objs: &mut Vec<SObject>) -> Vec<Result<(), Box<dyn Error>>> {
@@ -207,7 +356,7 @@ impl Connection {
             "{}/services/data/{}/{}/",
             self.instance_url, self.api_version, endpoint
         );
-        let result: QueryResult = self
+        let result: QueryApiResult = self
             .client
             .get(&request_url)
             .query(&[("q", query)])
@@ -246,7 +395,9 @@ impl Connection {
             sobjecttype.get_api_name(),
             id
         );
-        SObject::from_json(&self.client.get(&request_url).send()?.json()?, sobjecttype)
+        let response = Connection::handle_response(&self.client.get(&request_url).send()?)?;
+
+        SObject::from_json(response.json()?, sobjecttype)
     }
 
     pub fn retrieves(
@@ -258,24 +409,7 @@ impl Connection {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct CreateResult {
-    id: String,
-    errors: Vec<String>,
-    success: bool,
-}
-
-impl fmt::Display for CreateResult {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.success {
-            write!(f, "Success ({})", self.id)
-        } else {
-            write!(f, "DML error: {}", self.errors.join("\n"))
-        }
-    }
-}
-
-impl Error for CreateResult {}
+// SObject Data Structures
 
 impl FieldValue {
     fn to_json(&self) -> serde_json::Value {
