@@ -1,7 +1,7 @@
 use std::env;
 use std::error::Error;
 
-use oxideforce::{Connection, FieldValue, SObject};
+use oxideforce::{Connection, FieldValue, SObject, SalesforceId};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let sid = env::var("SESSION_ID")?;
@@ -23,6 +23,32 @@ fn main() -> Result<(), Box<dyn Error>> {
             conn.create(&mut sobj)?;
 
             println!("Created {} {}", &args[1], sobj.get_id().unwrap());
+        }
+        "update" => {
+            let mut sobj = SObject::new(&sobjecttype);
+
+            sobj.put("Id", FieldValue::Id(SalesforceId::new(&args[3])?))?;
+            sobj.put("Name", FieldValue::String(args[4].clone()))?;
+            conn.update(&mut sobj)?;
+
+            println!("Created {} {}", &args[1], sobj.get_id().unwrap());
+        }
+        "upsert" => {
+            let mut sobj = SObject::new(&sobjecttype);
+
+            sobj.put(&args[3], FieldValue::String(args[4].clone()))?;
+            sobj.put("Name", FieldValue::String(args[5].clone()))?;
+            conn.upsert(&mut sobj, &args[3])?;
+
+            println!("Upserted {} {}", &args[1], sobj.get_id().unwrap());
+        }
+        "delete" => {
+            let mut sobj = SObject::new(&sobjecttype);
+
+            sobj.put("Id", FieldValue::Id(SalesforceId::new(&args[3])?))?;
+            conn.delete(sobj)?;
+
+            println!("Deleted {} {}", &args[1], &args[3]);
         }
         _ => {
             println!("Unknown operation");

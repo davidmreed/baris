@@ -421,6 +421,7 @@ pub struct SObjectDescribe {
 
 impl SObjectDescribe {
     pub fn get_field(&self, api_name: &str) -> Option<&FieldDescribe> {
+        // TODO: cache a case-insensitive HashMap for fields.
         let target = api_name.to_lowercase();
 
         for f in self.fields.iter() {

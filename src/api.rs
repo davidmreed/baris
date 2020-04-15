@@ -75,10 +75,12 @@ impl Iterator for QueryIterator<'_> {
         if self.index < self.result.records.len() {
             self.index += 1;
 
-            Some(SObject::from_json(
-                &self.result.records[self.index - 1],
-                self.sobjecttype,
-            ))
+            Some(
+                SObject::from_json(
+                    &self.result.records[self.index - 1],
+                    self.sobjecttype,
+                )
+            )
         } else {
             None
         }
@@ -144,7 +146,7 @@ impl Connection {
 
     pub fn create(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
         if obj.get_id().is_some() {
-            return Err(Box::new(SalesforceError::CreateExistingRecord()));
+            return Err(Box::new(SalesforceError::RecordExistsError()));
         }
 
         let request_url = format!(
@@ -170,15 +172,101 @@ impl Connection {
     }
 
     pub fn update(&self, obj: &SObject) -> Result<(), Box<dyn Error>> {
-        unimplemented!();
-    }
+        if obj.get_id().is_none() {
+            return Err(Box::new(SalesforceError::RecordDoesNotExistError()));
+        }
 
-    pub fn upsert(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
-        unimplemented!();
+        let request_url = format!(
+            "{}/services/data/{}/sobjects/{}/{}",
+            self.instance_url,
+            self.api_version,
+            obj.sobjecttype.get_api_name(),
+            obj.get_id().unwrap()
+        );
+        let result: reqwest::blocking::Response = self
+            .client
+            .patch(&request_url)
+            .json(&obj.to_json())
+            .send()?;
+
+        if result.status().is_success() {
+            Ok(())
+        } else {
+            let result: DmlResult = result.json()?;
+            Err(Box::new(result))
+        }   
+     }
+
+    pub fn upsert(&self, obj: &mut SObject, field: &str) -> Result<(), Box<dyn Error>> {
+        if obj.sobjecttype.get_describe().get_field(field).is_none() {
+            return Err(Box::new(SalesforceError::SchemaError(format!("Field {} does not exist.", field))))
+        }
+        let field_value = obj.get(field);
+        if field_value.is_none() {
+            return Err(Box::new(SalesforceError::GeneralError(format!("Cannot upsert without a field value."))))
+        }
+
+        let external_id = match field_value.unwrap() {
+            FieldValue::String(string_val) => string_val.to_string(),
+            FieldValue::Id(sf_id) => sf_id.to_string(),
+            _ => {
+                return Err(
+                    Box::new(
+                        SalesforceError::GeneralError(
+                            format!(
+                                "Cannot upsert on a field of type {:?}.", 
+                                field_value.unwrap().get_soap_type()
+                            )
+                        )
+                    )
+                )
+            }
+        };
+
+        let request_url = format!(
+            "{}/services/data/{}/sobjects/{}/{}/{}",
+            self.instance_url,
+            self.api_version,
+            obj.sobjecttype.get_api_name(),
+            field,
+            external_id
+        );
+        let result: CreateResult = self
+            .client
+            .patch(&request_url)
+            .json(&obj.to_json())
+            .send()?
+            .json()?;
+            
+        if result.success {
+            obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?))?;
+
+            Ok(())
+        } else {
+            Err(Box::new(result))
+        }
     }
 
     pub fn delete(&self, obj: SObject) -> Result<(), Box<dyn Error>> {
-        unimplemented!();
+        if obj.get_id().is_none() {
+            return Err(Box::new(SalesforceError::RecordDoesNotExistError()));
+        }
+
+        let request_url = format!(
+            "{}/services/data/{}/sobjects/{}/{}",
+            self.instance_url,
+            self.api_version,
+            obj.sobjecttype.get_api_name(),
+            obj.get_id().unwrap()
+        );
+        let result: reqwest::blocking::Response = self.client.delete(&request_url).send()?;
+
+        if result.status().is_success() {
+            Ok(())
+        } else {
+            let result: DmlResult = result.json()?;
+            Err(Box::new(result))
+        }   
     }
 
     pub fn creates(&self, objs: &mut Vec<SObject>) -> Vec<Result<(), Box<dyn Error>>> {
@@ -263,6 +351,7 @@ struct CreateResult {
     id: String,
     errors: Vec<String>,
     success: bool,
+    created: Option<bool>
 }
 
 impl fmt::Display for CreateResult {
@@ -276,6 +365,22 @@ impl fmt::Display for CreateResult {
 }
 
 impl Error for CreateResult {}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DmlResult {
+    fields: Vec<String>,
+    message: String,
+    error_code: String,
+}
+
+impl fmt::Display for DmlResult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "DML error: {} ({}) on fields {}", self.error_code, self.message, self.fields.join("\n"))
+    }
+}
+
+impl Error for DmlResult {}
 
 impl FieldValue {
     fn to_json(&self) -> serde_json::Value {
