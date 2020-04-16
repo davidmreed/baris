@@ -144,6 +144,19 @@ impl Connection {
         }
     }
 
+    fn handle_create_result(response: reqwest::blocking::Response, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
+        let result: CreateResult = response.json()?;
+        
+        // FIXME: handle server errors.
+        if result.success {
+            obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?))?;
+
+            Ok(())
+        } else {
+            Err(Box::new(result))
+        }
+    }
+
     pub fn create(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
         if obj.get_id().is_some() {
             return Err(Box::new(SalesforceError::RecordExistsError()));
@@ -155,18 +168,15 @@ impl Connection {
             self.api_version,
             obj.sobjecttype.get_api_name()
         );
-        let result: CreateResult = self
-            .client
-            .post(&request_url)
-            .json(&obj.to_json())
-            .send()?
-            .json()?;
+        
+        Connection::handle_create_result(self.client.post(&request_url).json(&obj.to_json()).send()?, obj)
+    }
 
-        if result.success {
-            obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?))?;
-
+    fn handle_dml_result(response: reqwest::blocking::Response) -> Result<(), Box<dyn Error>> {
+        if response.status().is_success() {
             Ok(())
         } else {
+            let result: DmlError = response.json()?;
             Err(Box::new(result))
         }
     }
@@ -183,18 +193,7 @@ impl Connection {
             obj.sobjecttype.get_api_name(),
             obj.get_id().unwrap()
         );
-        let result: reqwest::blocking::Response = self
-            .client
-            .patch(&request_url)
-            .json(&obj.to_json())
-            .send()?;
-
-        if result.status().is_success() {
-            Ok(())
-        } else {
-            let result: DmlResult = result.json()?;
-            Err(Box::new(result))
-        }   
+        Connection::handle_dml_result(self.client.patch(&request_url).json(&obj.to_json()).send()?)
      }
 
     pub fn upsert(&self, obj: &mut SObject, field: &str) -> Result<(), Box<dyn Error>> {
@@ -231,20 +230,8 @@ impl Connection {
             field,
             external_id
         );
-        let result: CreateResult = self
-            .client
-            .patch(&request_url)
-            .json(&obj.to_json())
-            .send()?
-            .json()?;
-            
-        if result.success {
-            obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?))?;
 
-            Ok(())
-        } else {
-            Err(Box::new(result))
-        }
+        Connection::handle_create_result(self.client.patch(&request_url).json(&obj.to_json()).send()?, obj)
     }
 
     pub fn delete(&self, obj: SObject) -> Result<(), Box<dyn Error>> {
@@ -259,14 +246,8 @@ impl Connection {
             obj.sobjecttype.get_api_name(),
             obj.get_id().unwrap()
         );
-        let result: reqwest::blocking::Response = self.client.delete(&request_url).send()?;
 
-        if result.status().is_success() {
-            Ok(())
-        } else {
-            let result: DmlResult = result.json()?;
-            Err(Box::new(result))
-        }   
+        Connection::handle_dml_result(self.client.delete(&request_url).send()?)
     }
 
     pub fn creates(&self, objs: &mut Vec<SObject>) -> Vec<Result<(), Box<dyn Error>>> {
@@ -334,6 +315,7 @@ impl Connection {
             sobjecttype.get_api_name(),
             id
         );
+        // FIXME: how are errors returned?
         SObject::from_json(&self.client.get(&request_url).send()?.json()?, sobjecttype)
     }
 
@@ -368,19 +350,19 @@ impl Error for CreateResult {}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct DmlResult {
+struct DmlError {
     fields: Vec<String>,
     message: String,
     error_code: String,
 }
 
-impl fmt::Display for DmlResult {
+impl fmt::Display for DmlError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "DML error: {} ({}) on fields {}", self.error_code, self.message, self.fields.join("\n"))
     }
 }
 
-impl Error for DmlResult {}
+impl Error for DmlError {}
 
 impl FieldValue {
     fn to_json(&self) -> serde_json::Value {
