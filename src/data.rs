@@ -1,15 +1,16 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::error::Error;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::rc::Rc;
 
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 
 use super::errors::SalesforceError;
 
+use anyhow::Result;
+
+#[derive(Serialize, Deserialize, Copy, Clone)]
 #[serde(try_from = "&str")]
-#[derive(Deserialize)]
 pub struct SalesforceId {
     id: [u8; 18],
 }
@@ -74,6 +75,7 @@ pub enum FieldValue {
     Time(String),
     Date(String),
     Id(SalesforceId),
+    Null,
 }
 
 impl FieldValue {
@@ -141,6 +143,14 @@ impl FieldValue {
         }
     }
 
+    pub fn is_null(&self) -> bool {
+        if let FieldValue::Null = &self {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn get_soap_type(&self) -> SoapType {
         match &self {
             FieldValue::Integer(_) => SoapType::Integer,
@@ -151,6 +161,20 @@ impl FieldValue {
             FieldValue::Time(_) => SoapType::Time,
             FieldValue::Date(_) => SoapType::Date,
             FieldValue::Id(_) => SoapType::Id,
+        }
+    }
+
+    pub fn from_str(input: &str, field_type: &SoapType) -> Result<FieldValue> {
+        match field_type {
+            SoapType::Integer => Ok(FieldValue::Integer(input.parse()?)),
+            SoapType::Double => Ok(FieldValue::Double(input.parse()?)),
+            SoapType::Boolean => Ok(FieldValue::Boolean(input.parse()?)),
+            SoapType::String => Ok(FieldValue::String(input.to_owned())),
+            SoapType::DateTime => Ok(FieldValue::DateTime(input.to_owned())),
+            SoapType::Time => Ok(FieldValue::Time(input.to_owned())),
+            SoapType::Date => Ok(FieldValue::Date(input.to_owned())),
+            SoapType::Id => Ok(FieldValue::Id(input.try_into()?)),
+            _ => panic!("Unsupported type"), // TODO
         }
     }
 }
@@ -164,20 +188,21 @@ pub struct SObject {
 impl SObject {
     pub fn new(sobjecttype: &Rc<SObjectType>) -> SObject {
         SObject {
-            sobjecttype: Rc::clone(sobjecttype),
+            sobjecttype: Rc::clone(sobjecttype), // TODO: this should probably be Arc.
             fields: HashMap::new(),
         }
     }
 
-    pub fn put(&mut self, key: &str, val: FieldValue) -> Result<(), Box<dyn Error>> {
+    pub fn put(&mut self, key: &str, val: FieldValue) -> Result<()> {
         // Locate the describe for this field.
         let describe = self.sobjecttype.get_describe().get_field(key);
 
         if describe.is_none() {
-            return Err(Box::new(SalesforceError::SchemaError(format!(
+            return Err(SalesforceError::SchemaError(format!(
                 "Field {} does not exist or is not accessible",
                 key
-            ))));
+            ))
+            .into());
         }
 
         let describe = describe.unwrap();
@@ -185,13 +210,14 @@ impl SObject {
         // Validate that the provided value matches the type of this field
         // and satisfies any constraints we can check locally.
         if describe.soap_type != val.get_soap_type() {
-            Err(Box::new(SalesforceError::SchemaError(format!(
+            Err(SalesforceError::SchemaError(format!(
                 "Wrong type of value ({:?}) for field {}.{} (type {:?})",
                 val.get_soap_type(),
                 self.sobjecttype.get_api_name(),
                 key,
                 describe.soap_type
-            ))))
+            ))
+            .into())
         } else {
             self.fields.insert(key.to_lowercase(), val);
             Ok(())
@@ -212,6 +238,10 @@ impl SObject {
 
     pub fn get_binary_blob(&self, key: &str) {
         unimplemented!();
+    }
+
+    pub fn has_reference_parameters(&self) -> bool {
+        false
     }
 }
 
@@ -443,6 +473,10 @@ mod test {
         assert_eq!(
             "01Q36000000RXX5EAO",
             SalesforceId::new("01Q36000000RXX5").unwrap().to_string()
+        );
+        assert_eq!(
+            "01Q36000000RXX5EAO",
+            SalesforceId::new("01Q36000000RXX5EAO").unwrap().to_string()
         );
         assert_eq!(
             "0013600001ohPTpAAM",

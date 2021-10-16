@@ -5,107 +5,57 @@ extern crate serde_json;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::error::Error;
-use std::fmt;
 use std::rc::Rc;
 
 use super::data::{FieldValue, SObject, SObjectDescribe, SObjectType, SalesforceId, SoapType};
 use super::errors::SalesforceError;
 
-use reqwest::blocking::Client;
-use reqwest::header;
-use serde_derive::Deserialize;
+use crate::rest::SObjectDescribeRequest;
+
+use anyhow::{Error, Result};
+use reqwest::{header, Client, Method};
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct QueryResult {
-    total_size: usize,
-    done: bool,
-    records: Vec<serde_json::Value>,
-    next_records_url: Option<String>,
-}
+pub trait SalesforceRequest {
+    type ReturnValue;
 
-pub struct QueryIterator<'a> {
-    result: QueryResult,
-    conn: &'a Connection,
-    sobjecttype: &'a Rc<SObjectType>,
-    index: usize,
-}
+    fn get_body(&self) -> Option<Value> {
+        None
+    }
 
-impl QueryIterator<'_> {
-    fn new<'a>(
-        result: QueryResult,
-        conn: &'a Connection,
-        sobjecttype: &'a Rc<SObjectType>,
-    ) -> QueryIterator<'a> {
-        QueryIterator {
-            result,
-            conn,
-            sobjecttype,
-            index: 0,
-        }
+    fn get_url(&self) -> String;
+    fn get_method(&self) -> Method;
+
+    fn get_query_parameters(&self) -> Option<Value> {
+        None
+    }
+
+    fn has_reference_parameters(&self) -> bool {
+        false
+    }
+
+    fn get_result<T>(&self, conn: &Connection, body: &Value) -> Result<Self::ReturnValue>
+    where
+        T: DeserializeOwned,
+        for<'de> <Self as SalesforceRequest>::ReturnValue: serde::Deserialize<'de>,
+    {
+        // TODO: make this not clone
+        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
     }
 }
 
-impl Iterator for QueryIterator<'_> {
-    type Item = Result<SObject, Box<dyn Error>>;
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.result.total_size, Some(self.result.total_size))
-    }
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index == self.result.records.len() && !self.result.done {
-            // Attempt to fetch the next block of records.
-            if let Some(next_url) = &self.result.next_records_url {
-                let request_url = format!("{}/{}", self.conn.instance_url, next_url);
-                self.result = self
-                    .conn
-                    .client
-                    .get(&request_url)
-                    .send()
-                    .unwrap()
-                    .json()
-                    .unwrap(); // FIXME: better error propagation.
-                self.index = 0;
-            }
-        }
-
-        if self.index < self.result.records.len() {
-            self.index += 1;
-
-            Some(
-                SObject::from_json(
-                    &self.result.records[self.index - 1],
-                    self.sobjecttype,
-                )
-            )
-        } else {
-            None
-        }
-    }
-}
-
-impl ExactSizeIterator for QueryIterator<'_> {
-    fn len(&self) -> usize {
-        self.result.total_size
-    }
-}
+pub trait CompositeFriendlyRequest {}
 
 pub struct Connection {
     instance_url: String,
     api_version: String,
     sobject_types: RefCell<HashMap<String, Rc<SObjectType>>>,
-    client: Client,
+    pub(crate) client: Client,
 }
 
 impl Connection {
-    pub fn new(
-        sid: &str,
-        instance_url: &str,
-        api_version: &str,
-    ) -> Result<Connection, Box<dyn Error>> {
+    pub fn new(sid: &str, instance_url: &str, api_version: &str) -> Result<Connection> {
         let mut headers = header::HeaderMap::new();
 
         headers.insert(
@@ -121,15 +71,16 @@ impl Connection {
         })
     }
 
-    pub fn get_type(&self, type_name: &str) -> Result<Rc<SObjectType>, Box<dyn Error>> {
+    pub fn get_base_url(&self) -> String {
+        format!("{}/services/data/{}", self.instance_url, self.api_version)
+    }
+
+    pub async fn get_type(&self, type_name: &str) -> Result<Rc<SObjectType>> {
         if !self.sobject_types.borrow().contains_key(type_name) {
             // Pull the Describe information for this sObject
-            let request_url = format!(
-                "{}/services/data/{}/sobjects/{}/describe",
-                self.instance_url, self.api_version, type_name
-            );
-            let response = self.client.get(&request_url).send()?;
-            let describe: SObjectDescribe = response.json()?;
+            let describe: SObjectDescribe = self
+                .execute(&SObjectDescribeRequest::new(type_name))
+                .await?;
             self.sobject_types.borrow_mut().insert(
                 type_name.to_string(),
                 Rc::new(SObjectType::new(type_name.to_string(), describe)),
@@ -138,231 +89,36 @@ impl Connection {
 
         match self.sobject_types.borrow().get(type_name) {
             Some(rc) => Ok(Rc::clone(rc)),
-            None => Err(Box::new(SalesforceError::GeneralError(
+            None => Err(Error::new(SalesforceError::GeneralError(
                 "sObject Type not found".to_string(),
             ))),
         }
     }
 
-    fn handle_create_result(response: reqwest::blocking::Response, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
-        let result: CreateResult = response.json()?;
-        
-        // FIXME: handle server errors.
-        if result.success {
-            obj.put("id", FieldValue::Id(SalesforceId::new(&result.id)?))?;
+    pub async fn execute<K, T>(&self, request: &K) -> Result<T>
+    where
+        K: SalesforceRequest<ReturnValue = T>,
+        T: DeserializeOwned,
+    {
+        let url = format!("{}{}", self.get_base_url(), request.get_url());
+        let mut builder = self.client.request(request.get_method(), &url);
+        let method = request.get_method();
 
-            Ok(())
-        } else {
-            Err(Box::new(result))
-        }
-    }
-
-    pub fn create(&self, obj: &mut SObject) -> Result<(), Box<dyn Error>> {
-        if obj.get_id().is_some() {
-            return Err(Box::new(SalesforceError::RecordExistsError()));
-        }
-
-        let request_url = format!(
-            "{}/services/data/{}/sobjects/{}/",
-            self.instance_url,
-            self.api_version,
-            obj.sobjecttype.get_api_name()
-        );
-        
-        Connection::handle_create_result(self.client.post(&request_url).json(&obj.to_json()).send()?, obj)
-    }
-
-    fn handle_dml_result(response: reqwest::blocking::Response) -> Result<(), Box<dyn Error>> {
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            let result: DmlError = response.json()?;
-            Err(Box::new(result))
-        }
-    }
-
-    pub fn update(&self, obj: &SObject) -> Result<(), Box<dyn Error>> {
-        if obj.get_id().is_none() {
-            return Err(Box::new(SalesforceError::RecordDoesNotExistError()));
-        }
-
-        let request_url = format!(
-            "{}/services/data/{}/sobjects/{}/{}",
-            self.instance_url,
-            self.api_version,
-            obj.sobjecttype.get_api_name(),
-            obj.get_id().unwrap()
-        );
-        Connection::handle_dml_result(self.client.patch(&request_url).json(&obj.to_json()).send()?)
-     }
-
-    pub fn upsert(&self, obj: &mut SObject, field: &str) -> Result<(), Box<dyn Error>> {
-        if obj.sobjecttype.get_describe().get_field(field).is_none() {
-            return Err(Box::new(SalesforceError::SchemaError(format!("Field {} does not exist.", field))))
-        }
-        let field_value = obj.get(field);
-        if field_value.is_none() {
-            return Err(Box::new(SalesforceError::GeneralError(format!("Cannot upsert without a field value."))))
-        }
-
-        let external_id = match field_value.unwrap() {
-            FieldValue::String(string_val) => string_val.to_string(),
-            FieldValue::Id(sf_id) => sf_id.to_string(),
-            _ => {
-                return Err(
-                    Box::new(
-                        SalesforceError::GeneralError(
-                            format!(
-                                "Cannot upsert on a field of type {:?}.", 
-                                field_value.unwrap().get_soap_type()
-                            )
-                        )
-                    )
-                )
+        if method == Method::POST || method == Method::PUT || method == Method::PATCH {
+            if let Some(body) = request.get_body() {
+                builder = builder.json(&body);
             }
-        };
-
-        let request_url = format!(
-            "{}/services/data/{}/sobjects/{}/{}/{}",
-            self.instance_url,
-            self.api_version,
-            obj.sobjecttype.get_api_name(),
-            field,
-            external_id
-        );
-
-        Connection::handle_create_result(self.client.patch(&request_url).json(&obj.to_json()).send()?, obj)
-    }
-
-    pub fn delete(&self, obj: SObject) -> Result<(), Box<dyn Error>> {
-        if obj.get_id().is_none() {
-            return Err(Box::new(SalesforceError::RecordDoesNotExistError()));
         }
 
-        let request_url = format!(
-            "{}/services/data/{}/sobjects/{}/{}",
-            self.instance_url,
-            self.api_version,
-            obj.sobjecttype.get_api_name(),
-            obj.get_id().unwrap()
-        );
-
-        Connection::handle_dml_result(self.client.delete(&request_url).send()?)
-    }
-
-    pub fn creates(&self, objs: &mut Vec<SObject>) -> Vec<Result<(), Box<dyn Error>>> {
-        unimplemented!();
-    }
-
-    pub fn updates(&self, objs: &Vec<SObject>) -> Vec<Result<(), Box<dyn Error>>> {
-        unimplemented!();
-    }
-
-    pub fn upserts(&self, objs: &mut Vec<SObject>) -> Vec<Result<(), Box<dyn Error>>> {
-        unimplemented!();
-    }
-
-    pub fn deletes(&self, objs: Vec<SObject>) -> Vec<Result<(), Box<dyn Error>>> {
-        unimplemented!();
-    }
-
-    fn execute_query<'a>(
-        &'a self,
-        sobjecttype: &'a Rc<SObjectType>,
-        query: &str,
-        endpoint: &str,
-    ) -> Result<QueryIterator<'a>, Box<dyn Error>> {
-        let request_url = format!(
-            "{}/services/data/{}/{}/",
-            self.instance_url, self.api_version, endpoint
-        );
-        let result: QueryResult = self
-            .client
-            .get(&request_url)
-            .query(&[("q", query)])
-            .send()?
-            .json()?;
-
-        Ok(QueryIterator::new(result, self, sobjecttype))
-    }
-
-    pub fn query<'a>(
-        &'a self,
-        sobjecttype: &'a Rc<SObjectType>,
-        query: &str,
-    ) -> Result<QueryIterator<'a>, Box<dyn Error>> {
-        self.execute_query(sobjecttype, query, "query")
-    }
-
-    pub fn query_all<'a>(
-        &'a self,
-        sobjecttype: &'a Rc<SObjectType>,
-        query: &str,
-    ) -> Result<QueryIterator<'a>, Box<dyn Error>> {
-        self.execute_query(sobjecttype, query, "queryAll")
-    }
-
-    pub fn retrieve(
-        &self,
-        id: &SalesforceId,
-        sobjecttype: &Rc<SObjectType>,
-        fields: &Vec<String>,
-    ) -> Result<SObject, Box<dyn Error>> {
-        let request_url = format!(
-            "{}/services/data/{}/sobjects/{}/{}/",
-            self.instance_url,
-            self.api_version,
-            sobjecttype.get_api_name(),
-            id
-        );
-        // FIXME: how are errors returned?
-        SObject::from_json(&self.client.get(&request_url).send()?.json()?, sobjecttype)
-    }
-
-    pub fn retrieves(
-        &self,
-        ids: &Vec<SalesforceId>,
-        fields: &Vec<String>,
-    ) -> Result<Vec<SObject>, Box<dyn Error>> {
-        unimplemented!();
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateResult {
-    id: String,
-    errors: Vec<String>,
-    success: bool,
-    created: Option<bool>
-}
-
-impl fmt::Display for CreateResult {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.success {
-            write!(f, "Success ({})", self.id)
-        } else {
-            write!(f, "DML error: {}", self.errors.join("\n"))
+        if let Some(params) = request.get_query_parameters() {
+            builder = builder.query(&params);
         }
+
+        let result = builder.send().await?.json().await?;
+
+        Ok(request.get_result::<T>(&self, &result)?)
     }
 }
-
-impl Error for CreateResult {}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DmlError {
-    fields: Vec<String>,
-    message: String,
-    error_code: String,
-}
-
-impl fmt::Display for DmlError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "DML error: {} ({}) on fields {}", self.error_code, self.message, self.fields.join("\n"))
-    }
-}
-
-impl Error for DmlError {}
 
 impl FieldValue {
     fn to_json(&self) -> serde_json::Value {
@@ -382,10 +138,7 @@ impl FieldValue {
         }
     }
 
-    fn from_json(
-        value: &serde_json::Value,
-        soap_type: SoapType,
-    ) -> Result<FieldValue, Box<dyn Error>> {
+    fn from_json(value: &serde_json::Value, soap_type: SoapType) -> Result<FieldValue> {
         match soap_type {
             SoapType::Address | SoapType::Any | SoapType::Blob => panic!("Not supported"),
             SoapType::Boolean => {
@@ -430,17 +183,36 @@ impl FieldValue {
             }
         }
 
-        return Err(Box::new(SalesforceError::SchemaError(
-            "Unable to convert value from JSON".to_string(),
-        )));
+        Err(SalesforceError::SchemaError("Unable to convert value from JSON".to_string()).into())
     }
 }
 
 impl SObject {
-    fn from_json(
+    pub(crate) fn from_csv(
+        rec: &HashMap<String, String>,
+        sobjecttype: &Rc<SObjectType>,
+    ) -> Result<SObject> {
+        let mut ret = SObject::new(sobjecttype);
+
+        for k in rec.keys() {
+            // Get the describe for this field.
+            if k != "attributes" {
+                let describe = sobjecttype.get_describe().get_field(k).unwrap();
+
+                ret.put(
+                    k,
+                    FieldValue::from_str(rec.get(k).unwrap(), &describe.soap_type)?,
+                )?;
+            }
+        }
+
+        Ok(ret)
+    }
+
+    pub(crate) fn from_json(
         value: &serde_json::Value,
         sobjecttype: &Rc<SObjectType>,
-    ) -> Result<SObject, Box<dyn Error>> {
+    ) -> Result<SObject> {
         let mut ret = SObject::new(sobjecttype);
 
         if let Value::Object(content) = value {
@@ -456,7 +228,7 @@ impl SObject {
                 }
             }
         } else {
-            return Err(Box::new(SalesforceError::GeneralError(
+            return Err(Error::new(SalesforceError::GeneralError(
                 "Invalid record JSON".to_string(),
             )));
         }
@@ -464,7 +236,7 @@ impl SObject {
         Ok(ret)
     }
 
-    fn to_json(&self) -> serde_json::Value {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
         let mut map = serde_json::Map::new();
 
         for (k, v) in self.fields.iter() {

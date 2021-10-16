@@ -1,9 +1,10 @@
 use std::env;
 use std::error::Error;
 
+use anyhow::Result;
 use oxideforce::{Connection, FieldValue, SObject, SalesforceId};
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<()> {
     let sid = env::var("SESSION_ID")?;
     let instance_url = env::var("INSTANCE_URL")?;
     let args: Vec<String> = env::args().collect();
