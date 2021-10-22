@@ -8,7 +8,7 @@ use crate::{Connection, SObject, SObjectType, SalesforceError, SalesforceId};
 use serde_derive::Deserialize;
 use std::error::Error;
 use std::fmt;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use anyhow::Result;
 
@@ -211,7 +211,10 @@ impl SalesforceRequest for SObjectUpsertRequest {
         format!(
             "/sobjects/{}/{}/{}",
             self.sobject.sobjecttype.get_api_name(),
-            self.sobject.get(&self.external_id).unwrap().into(), // will not panic via implementation of `new()`
+            self.sobject
+                .get(&self.external_id)
+                .unwrap()
+                .into::<String>(), // will not panic via implementation of `new()`
             self.external_id
         )
     }
@@ -261,14 +264,14 @@ impl CompositeFriendlyRequest for SObjectDeleteRequest {}
 
 pub struct SObjectRetrieveRequest {
     id: SalesforceId,
-    sobject_type: Rc<SObjectType>,
+    sobject_type: Arc<SObjectType>,
 }
 
 impl SObjectRetrieveRequest {
-    fn new(id: SalesforceId, sobject_type: &Rc<SObjectType>) -> SObjectRetrieveRequest {
+    fn new(id: SalesforceId, sobject_type: &Arc<SObjectType>) -> SObjectRetrieveRequest {
         SObjectRetrieveRequest {
             id,
-            sobject_type: Rc::clone(sobject_type),
+            sobject_type: Arc::clone(sobject_type),
         }
     }
 }
@@ -288,7 +291,7 @@ impl SalesforceRequest for SObjectRetrieveRequest {
         Method::GET
     }
 
-    fn get_result(&self, conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
+    fn get_result<SObject>(&self, conn: &Connection, body: &Value) -> Result<SObject> {
         Ok(SObject::from_json(body, &self.sobject_type)?)
     }
 }

@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use serde_derive::{Deserialize, Serialize};
 
 use super::errors::SalesforceError;
 
-use anyhow::Result;
+use anyhow::{Error, Result};
 
 #[derive(Serialize, Deserialize, Copy, Clone)]
 #[serde(try_from = "&str")]
@@ -181,14 +181,14 @@ impl FieldValue {
 
 #[derive(Debug)]
 pub struct SObject {
-    pub sobjecttype: Rc<SObjectType>,
+    pub sobjecttype: Arc<SObjectType>,
     pub fields: HashMap<String, FieldValue>,
 }
 
 impl SObject {
-    pub fn new(sobjecttype: &Rc<SObjectType>) -> SObject {
+    pub fn new(sobjecttype: &Arc<SObjectType>) -> SObject {
         SObject {
-            sobjecttype: Rc::clone(sobjecttype), // TODO: this should probably be Arc.
+            sobjecttype: Arc::clone(sobjecttype),
             fields: HashMap::new(),
         }
     }
@@ -242,6 +242,147 @@ impl SObject {
 
     pub fn has_reference_parameters(&self) -> bool {
         false
+    }
+
+    pub(crate) fn from_csv(
+        rec: &HashMap<String, String>,
+        sobjecttype: &Arc<SObjectType>,
+    ) -> Result<SObject> {
+        let mut ret = SObject::new(sobjecttype);
+
+        for k in rec.keys() {
+            // Get the describe for this field.
+            if k != "attributes" {
+                let describe = sobjecttype.get_describe().get_field(k).unwrap();
+
+                ret.put(
+                    k,
+                    FieldValue::from_str(rec.get(k).unwrap(), &describe.soap_type)?,
+                )?;
+            }
+        }
+
+        Ok(ret)
+    }
+
+    pub fn from_json(value: &serde_json::Value, sobjecttype: &Arc<SObjectType>) -> Result<SObject> {
+        let mut ret = SObject::new(sobjecttype);
+
+        if let serde_json::Value::Object(content) = value {
+            for k in content.keys() {
+                // Get the describe for this field.
+                if k != "attributes" {
+                    let describe = sobjecttype.get_describe().get_field(k).unwrap();
+
+                    ret.put(
+                        k,
+                        FieldValue::from_json(value.get(k).unwrap(), describe.soap_type)?,
+                    )?;
+                }
+            }
+        } else {
+            return Err(Error::new(SalesforceError::GeneralError(
+                "Invalid record JSON".to_string(),
+            )));
+        }
+
+        Ok(ret)
+    }
+
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+
+        for (k, v) in self.fields.iter() {
+            map.insert(k.to_string(), v.into());
+        }
+
+        serde_json::Value::Object(map)
+    }
+}
+
+impl From<&FieldValue> for serde_json::Value {
+    fn from(f: &FieldValue) -> serde_json::Value {
+        match f {
+            FieldValue::Integer(i) => {
+                serde_json::Value::Number(serde_json::Number::from_f64(*i as f64).unwrap())
+            }
+            FieldValue::Double(i) => {
+                serde_json::Value::Number(serde_json::Number::from_f64(*i).unwrap())
+            }
+            FieldValue::Boolean(i) => serde_json::Value::Bool(*i),
+            FieldValue::String(i) => serde_json::Value::String(i.clone()),
+            FieldValue::DateTime(i) => serde_json::Value::String(i.clone()),
+            FieldValue::Time(i) => serde_json::Value::String(i.clone()),
+            FieldValue::Date(i) => serde_json::Value::String(i.clone()),
+            FieldValue::Id(i) => serde_json::Value::String(i.to_string()),
+            FieldValue::Null => serde_json::Value::Null,
+        }
+    }
+}
+
+impl From<&FieldValue> for String {
+    fn from(f: &FieldValue) -> String {
+        match f {
+            FieldValue::Integer(i) => format!("{}", i),
+            FieldValue::Double(i) => format!("{}", i),
+            FieldValue::Boolean(i) => format!("{}", i),
+            FieldValue::String(i) => i.clone(),
+            FieldValue::DateTime(i) => i.clone(),
+            FieldValue::Time(i) => i.clone(),
+            FieldValue::Date(i) => i.clone(),
+            FieldValue::Id(i) => i.to_string(),
+            FieldValue::Null => "".to_string(),
+        }
+    }
+}
+
+impl FieldValue {
+    fn from_json(value: &serde_json::Value, soap_type: SoapType) -> Result<FieldValue> {
+        match soap_type {
+            SoapType::Address | SoapType::Any | SoapType::Blob => panic!("Not supported"),
+            SoapType::Boolean => {
+                if let serde_json::Value::Bool(b) = value {
+                    return Ok(FieldValue::Boolean(*b));
+                }
+            }
+            SoapType::Date => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::Date(b.to_string()));
+                }
+            }
+            SoapType::DateTime => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::DateTime(b.to_string()));
+                }
+            }
+            SoapType::Time => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::Time(b.to_string()));
+                }
+            }
+            SoapType::Double => {
+                if let serde_json::Value::Number(b) = value {
+                    return Ok(FieldValue::Double(b.as_f64().unwrap()));
+                }
+            }
+            SoapType::Integer => {
+                if let serde_json::Value::Number(b) = value {
+                    return Ok(FieldValue::Integer(b.as_i64().unwrap()));
+                }
+            }
+            SoapType::Id => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::Id(SalesforceId::new(b)?));
+                }
+            }
+            SoapType::String => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::String(b.to_string()));
+                }
+            }
+        }
+
+        Err(SalesforceError::SchemaError("Unable to convert value from JSON".to_string()).into())
     }
 }
 

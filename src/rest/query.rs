@@ -2,7 +2,7 @@ use std::{
     pin::Pin,
     stream::Stream,
     task::{Context, Poll},
-    time::Duration,
+    time::Duration
 };
 
 
@@ -14,8 +14,8 @@ struct QueryRequest {
 }
 
 impl QueryRequest {
-    pub fn new(connection: &'a Connection, sobject_type: &'a Rc<SObjectType>, query: &str, all: bool) -> QueryRequest {
-        QueryRequest {connection, query.to_owned(), sobject_type: Rc::clone(sobject_type), all}
+    pub fn new(connection: &'a Connection, sobject_type: &'a Arc<SObjectType>, query: &str, all: bool) -> QueryRequest {
+        QueryRequest {connection, query.to_owned(), sobject_type: Arc::clone(sobject_type), all}
     }
 }
 
@@ -78,7 +78,7 @@ impl QueryStream<'_> {
     fn new<'a>(
         result: QueryResult,
         conn: &'a Connection,
-        sobject_type: &'a Rc<SObjectType>,
+        sobject_type: &'a Arc<SObjectType>,
     ) -> Result<Self> {
         QueryStream {
             buffer: result.records.map(|r| SObject::from_json(
