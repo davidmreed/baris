@@ -4,6 +4,7 @@ extern crate serde_derive;
 extern crate serde_json;
 
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use super::data::{SObjectDescribe, SObjectType};
@@ -13,7 +14,6 @@ use crate::rest::SObjectDescribeRequest;
 
 use anyhow::{Error, Result};
 use reqwest::{header, Client, Method};
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tokio::sync::RwLock;
 
@@ -35,23 +35,34 @@ pub trait SalesforceRequest {
         false
     }
 
-    fn get_result<T>(&self, conn: &Connection, body: &Value) -> Result<Self::ReturnValue>
-    where
-        T: DeserializeOwned,
-        for<'de> <Self as SalesforceRequest>::ReturnValue: serde::Deserialize<'de>,
-    {
-        // TODO: make this not clone
-        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
-    }
+    fn get_result(&self, conn: &Connection, body: &Value) -> Result<Self::ReturnValue>;
 }
 
 pub trait CompositeFriendlyRequest {}
 
-pub struct Connection {
-    instance_url: String,
-    api_version: String,
-    sobject_types: RwLock<HashMap<String, Arc<SObjectType>>>,
+pub struct ConnectionBody {
+    pub(crate) instance_url: String,
+    pub(crate) api_version: String,
+    sobject_types: RwLock<HashMap<String, SObjectType>>,
     pub(crate) client: Client,
+}
+
+pub struct Connection(Arc<ConnectionBody>);
+
+impl Deref for Connection {
+    type Target = ConnectionBody;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Clone for Connection {
+    fn clone(&self) -> Self {
+        Connection {
+            0: Arc::clone(&self.0),
+        }
+    }
 }
 
 impl Connection {
@@ -64,10 +75,12 @@ impl Connection {
         );
 
         Ok(Connection {
-            api_version: api_version.to_string(),
-            instance_url: instance_url.to_string(),
-            sobject_types: RwLock::new(HashMap::new()),
-            client: Client::builder().default_headers(headers).build()?,
+            0: Arc::new(ConnectionBody {
+                api_version: api_version.to_string(),
+                instance_url: instance_url.to_string(),
+                sobject_types: RwLock::new(HashMap::new()),
+                client: Client::builder().default_headers(headers).build()?,
+            }),
         })
     }
 
@@ -75,7 +88,7 @@ impl Connection {
         format!("{}/services/data/{}", self.instance_url, self.api_version)
     }
 
-    pub async fn get_type(&self, type_name: &str) -> Result<Arc<SObjectType>> {
+    pub async fn get_type(&self, type_name: &str) -> Result<SObjectType> {
         // TODO: can we be clever here to reduce lock contention?
         let mut sobject_types = self.sobject_types.write().await;
 
@@ -86,12 +99,12 @@ impl Connection {
                 .await?;
             sobject_types.insert(
                 type_name.to_string(),
-                Arc::new(SObjectType::new(type_name.to_string(), describe)),
+                SObjectType::new(type_name.to_string(), describe),
             );
         }
 
         match sobject_types.get(type_name) {
-            Some(rc) => Ok(Arc::clone(rc)),
+            Some(rc) => Ok(rc.clone()), // TODO: Is this correct?
             None => Err(Error::new(SalesforceError::GeneralError(
                 "sObject Type not found".to_string(),
             ))),
@@ -101,7 +114,6 @@ impl Connection {
     pub async fn execute<K, T>(&self, request: &K) -> Result<T>
     where
         K: SalesforceRequest<ReturnValue = T>,
-        T: DeserializeOwned,
     {
         let url = format!("{}{}", self.get_base_url(), request.get_url());
         let mut builder = self.client.request(request.get_method(), &url);
@@ -119,6 +131,6 @@ impl Connection {
 
         let result = builder.send().await?.json().await?;
 
-        Ok(request.get_result::<T>(&self, &result)?)
+        Ok(request.get_result(&self, &result)?)
     }
 }

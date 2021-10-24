@@ -1,11 +1,9 @@
 use serde_derive::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    mem,
     ops::Deref,
     pin::Pin,
     stream::Stream,
-    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -16,7 +14,7 @@ use std::collections::VecDeque;
 use tokio::task::{spawn, JoinHandle};
 use tokio::time::sleep;
 
-use crate::{Connection, SObject, SObjectType, SalesforceId};
+use crate::{Connection, SObject, SObjectType, SalesforceError, SalesforceId};
 
 const POLL_INTERVAL: u64 = 10;
 
@@ -102,102 +100,101 @@ struct BulkQueryJobDetail {
 
 const RESULTS_CHUNK_SIZE: u32 = 2000;
 
-pub struct BulkQueryResultStream<'a> {
+pub struct BulkQueryResultStream {
     locator: Option<String>,
     job: BulkQueryJob,
-    conn: &'a Connection,
-    sobject_type: Arc<SObjectType>,
+    conn: Connection,
+    sobject_type: SObjectType,
     buffer: Option<VecDeque<SObject>>,
-    retrieve_task: Option<JoinHandle<Result<()>>>,
+    retrieve_task: Option<JoinHandle<Result<(VecDeque<SObject>, bool, Option<String>)>>>,
     done: bool,
 }
 
-impl<'a> BulkQueryResultStream<'a> {
-    async fn new(
+impl BulkQueryResultStream {
+    fn new(
         job: BulkQueryJob,
-        sobject_type: &'a Arc<SObjectType>,
-        conn: &'a Connection,
-    ) -> Result<BulkQueryResultStream<'a>> {
-        let mut new_iterator = BulkQueryResultStream {
+        sobject_type: &SObjectType,
+        conn: &Connection,
+    ) -> Result<BulkQueryResultStream> {
+        Ok(BulkQueryResultStream {
             locator: None,
             job,
-            conn,
-            sobject_type: Arc::clone(sobject_type),
+            conn: conn.clone(),
+            sobject_type: sobject_type.clone(),
             buffer: None,
             retrieve_task: None,
             done: false,
-        };
-
-        new_iterator.get_next_result_set().await?; // TODO
-
-        Ok(new_iterator)
+        })
     }
 
-    async fn get_next_result_set(&mut self) -> Result<()> {
-        let url = format!(
-            "{}/jobs/query/{}/results",
-            self.conn.get_base_url(),
-            *self.job
-        );
+    async fn get_next_result_set(
+        conn: Connection,
+        sobject_type: SObjectType,
+        job_id: BulkQueryJob,
+        locator: Option<String>,
+    ) -> Result<(VecDeque<SObject>, bool, Option<String>)> {
+        let url = format!("{}/jobs/query/{}/results", conn.get_base_url(), *job_id);
         let mut query = HashMap::new();
 
         query.insert("maxRecords", format!("{}", RESULTS_CHUNK_SIZE));
-        let locator = mem::take(&mut self.locator);
 
         if let Some(locator) = locator {
-            query.insert("locator", locator.clone());
+            query.insert("locator", locator);
         }
 
-        let result = self
-            .conn
+        let result = conn
             .client
             .get(&url)
             .query(&query)
             .send()
             .await?
             .error_for_status()?;
+
         let headers = result.headers();
 
         // Ingest the headers that contain our next locator.
-        if let Some(locator) = headers.get("Sforce-Locator") {
-            if locator == "null" {
-                // The literal string "null" means that we've consumed all of the results.
-                self.done = true;
-                self.locator = None;
-            } else {
-                self.locator = Some(locator.to_str()?.to_string());
-            }
-        }
+        let locator_header = headers
+            .get("Sforce-Locator")
+            .ok_or(SalesforceError::GeneralError(
+                "No record set locator returned".into(),
+            ))?
+            .to_str()?;
+
+        let (done, next_locator) = if locator_header == "null" {
+            // The literal string "null" means that we've consumed all of the results.
+            (true, None)
+        } else {
+            (false, Some(locator_header.to_string()))
+        };
 
         // Ingest the CSV records
         let content = result.bytes().await?;
         // TODO: respect this job's settings for delimiter.
-        let reader = csv::Reader::from_reader(&*content);
+        let result = csv::Reader::from_reader(&*content)
+            .into_deserialize::<HashMap<String, String>>()
+            .map(|r| Ok(SObject::from_csv(&r?, &sobject_type)?))
+            .collect::<Result<VecDeque<SObject>>>()?;
 
-        // TODO: this might need to be a `spawn_blocking()`
-        self.buffer = Some(
-            reader
-                .into_deserialize::<HashMap<String, String>>()
-                .map(|r| Ok(SObject::from_csv(&r?, &self.sobject_type)?))
-                .collect::<Result<VecDeque<SObject>>>()?,
-        );
-
-        self.retrieve_task = None;
-        Ok(())
+        Ok((result, done, next_locator))
     }
 }
 
-impl<'a> Stream for BulkQueryResultStream<'a> {
+impl Stream for BulkQueryResultStream {
     type Item = Result<SObject>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(buffer) = self.buffer {
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(buffer) = &mut self.buffer {
             if let Some(item) = buffer.pop_front() {
                 Poll::Ready(Some(Ok(item)))
             } else {
                 self.buffer = None;
                 if self.retrieve_task.is_none() {
-                    self.retrieve_task = Some(spawn(self.get_next_result_set()));
+                    self.retrieve_task = Some(spawn(BulkQueryResultStream::get_next_result_set(
+                        self.conn.clone(),
+                        self.sobject_type.clone(),
+                        self.job.clone(),
+                        self.locator.clone(),
+                    )));
                 }
 
                 Poll::Pending
@@ -235,21 +232,23 @@ impl BulkQueryJob {
         return Ok(BulkQueryJob(result.id));
     }
 
-    pub async fn abort(&self, conn: &Connection) -> Result<()> {
+    pub async fn abort(&self, _conn: &Connection) -> Result<()> {
         todo!();
     }
 
     pub async fn check_status(&self, conn: &Connection) -> Result<BulkQueryJobDetail> {
-        conn.client
+        Ok(conn
+            .client
             .get(&format!("{}/jobs/query/{}", conn.get_base_url(), &self.0))
             .send()
             .await?
             .json()
-            .await?
+            .await?)
     }
 
-    pub async fn complete(self, conn: &Arc<Connection>) -> Result<BulkQueryJobDetail> {
-        let conn = Arc::clone(conn);
+    pub async fn complete(self, conn: &Connection) -> Result<BulkQueryJobDetail> {
+        let conn = conn.clone();
+
         spawn(async move {
             loop {
                 let status: BulkQueryJobDetail = self.check_status(&conn).await?;
@@ -264,11 +263,11 @@ impl BulkQueryJob {
         .await?
     }
 
-    pub async fn get_results_stream<'a>(
+    pub async fn get_results_stream(
         &self,
-        conn: &'a Connection,
-        sobject_type: &'a Arc<SObjectType>,
-    ) -> Result<BulkQueryResultStream<'a>> {
-        BulkQueryResultStream::new(*self, sobject_type, conn).await
+        conn: &Connection,
+        sobject_type: &SObjectType,
+    ) -> Result<BulkQueryResultStream> {
+        BulkQueryResultStream::new(*self, sobject_type, conn)
     }
 }

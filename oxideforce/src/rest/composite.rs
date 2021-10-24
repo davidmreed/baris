@@ -1,3 +1,7 @@
+/*use serde_json::Value;
+
+use crate::api::SalesforceRequest;
+
 pub struct CompositeRequest {
     requests: Vec<Box<dyn SalesforceRequest>>,
 }
@@ -7,5 +11,6 @@ impl CompositeRequest {
 }
 
 impl SalesforceRequest for CompositeRequest {
-    type ReturnValue = CompositeResult;
+    type ReturnValue = Value;
 }
+*/

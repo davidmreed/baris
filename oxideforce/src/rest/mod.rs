@@ -8,10 +8,11 @@ use crate::{Connection, SObject, SObjectType, SalesforceError, SalesforceId};
 use serde_derive::Deserialize;
 use std::error::Error;
 use std::fmt;
-use std::sync::Arc;
 
 use anyhow::Result;
 
+pub mod composite;
+pub mod query;
 // SObject Describe Requests
 
 pub struct SObjectDescribeRequest {
@@ -36,24 +37,28 @@ impl SalesforceRequest for SObjectDescribeRequest {
     fn get_method(&self) -> Method {
         Method::GET
     }
+
+    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
+        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
+    }
 }
 
 // SObject Create Requests
 
 #[derive(Debug, Deserialize)]
-struct CreateResult {
-    id: String,
-    errors: Vec<String>,
-    success: bool,
-    created: Option<bool>,
+pub struct CreateResult {
+    pub id: Option<String>,
+    pub errors: Option<Vec<String>>,
+    pub success: bool,
+    pub created: Option<bool>,
 }
 
 impl fmt::Display for CreateResult {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.success {
-            write!(f, "Success ({})", self.id)
+            write!(f, "Success ({})", self.id.as_ref().unwrap())
         } else {
-            write!(f, "DML error: {}", self.errors.join("\n"))
+            write!(f, "DML error: {}", self.errors.as_ref().unwrap().join("\n"))
         }
     }
 }
@@ -92,6 +97,10 @@ impl SalesforceRequest for SObjectCreateRequest {
     fn has_reference_parameters(&self) -> bool {
         self.sobject.has_reference_parameters()
     }
+
+    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
+        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
+    }
 }
 
 impl CompositeFriendlyRequest for SObjectCreateRequest {}
@@ -100,14 +109,14 @@ impl CompositeFriendlyRequest for SObjectCreateRequest {}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct DmlError {
-    fields: Vec<String>,
-    message: String,
-    error_code: String,
+pub struct DmlError {
+    pub fields: Vec<String>,
+    pub message: String,
+    pub error_code: String,
 }
 
 #[derive(Debug, Deserialize)]
-enum DmlResult {
+pub enum DmlResult {
     Success,
     Error(DmlError),
 }
@@ -156,8 +165,13 @@ impl SalesforceRequest for SObjectUpdateRequest {
             self.sobject.get_id().unwrap() // Cannot panic due to implementation of `new()`
         )
     }
+
     fn get_method(&self) -> Method {
         Method::PATCH
+    }
+
+    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
+        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
     }
 }
 
@@ -213,14 +227,18 @@ impl SalesforceRequest for SObjectUpsertRequest {
             self.sobject.sobjecttype.get_api_name(),
             self.sobject
                 .get(&self.external_id)
-                .unwrap()
-                .into::<String>(), // will not panic via implementation of `new()`
+                .unwrap() // will not panic via implementation of `new()`
+                .as_string(),
             self.external_id
         )
     }
 
     fn get_method(&self) -> Method {
         Method::PATCH
+    }
+
+    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
+        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
     }
 }
 
@@ -234,7 +252,7 @@ struct SObjectDeleteRequest {
 
 impl SObjectDeleteRequest {
     fn new(sobject: SObject) -> Result<SObjectDeleteRequest> {
-        if let Some(id) = sobject.get_id() {
+        if let Some(_) = sobject.get_id() {
             Ok(SObjectDeleteRequest { sobject })
         } else {
             Err(SalesforceError::RecordDoesNotExistError().into())
@@ -256,6 +274,10 @@ impl SalesforceRequest for SObjectDeleteRequest {
     fn get_method(&self) -> Method {
         Method::DELETE
     }
+
+    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
+        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
+    }
 }
 
 impl CompositeFriendlyRequest for SObjectDeleteRequest {}
@@ -264,14 +286,14 @@ impl CompositeFriendlyRequest for SObjectDeleteRequest {}
 
 pub struct SObjectRetrieveRequest {
     id: SalesforceId,
-    sobject_type: Arc<SObjectType>,
+    sobject_type: SObjectType,
 }
 
 impl SObjectRetrieveRequest {
-    fn new(id: SalesforceId, sobject_type: &Arc<SObjectType>) -> SObjectRetrieveRequest {
+    fn new(id: SalesforceId, sobject_type: &SObjectType) -> SObjectRetrieveRequest {
         SObjectRetrieveRequest {
             id,
-            sobject_type: Arc::clone(sobject_type),
+            sobject_type: sobject_type.clone(),
         }
     }
 }
@@ -291,7 +313,7 @@ impl SalesforceRequest for SObjectRetrieveRequest {
         Method::GET
     }
 
-    fn get_result<SObject>(&self, conn: &Connection, body: &Value) -> Result<SObject> {
+    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
         Ok(SObject::from_json(body, &self.sobject_type)?)
     }
 }

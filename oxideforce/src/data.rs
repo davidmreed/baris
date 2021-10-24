@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use serde_derive::{Deserialize, Serialize};
@@ -17,7 +18,7 @@ pub struct SalesforceId {
 
 impl SalesforceId {
     pub fn new(id: &str) -> Result<SalesforceId, SalesforceError> {
-        const ALNUMS: &[u8] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345".as_bytes();
+        const ALNUMS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
 
         if id.len() != 15 && id.len() != 18 {
             return Err(SalesforceError::InvalidIdError(id.to_string()));
@@ -161,6 +162,7 @@ impl FieldValue {
             FieldValue::Time(_) => SoapType::Time,
             FieldValue::Date(_) => SoapType::Date,
             FieldValue::Id(_) => SoapType::Id,
+            _ => SoapType::Any, // TODO: this is probably not an optimal solution for nulls.
         }
     }
 
@@ -179,16 +181,15 @@ impl FieldValue {
     }
 }
 
-#[derive(Debug)]
 pub struct SObject {
-    pub sobjecttype: Arc<SObjectType>,
+    pub sobjecttype: SObjectType,
     pub fields: HashMap<String, FieldValue>,
 }
 
 impl SObject {
-    pub fn new(sobjecttype: &Arc<SObjectType>) -> SObject {
+    pub fn new(sobjecttype: &SObjectType) -> SObject {
         SObject {
-            sobjecttype: Arc::clone(sobjecttype),
+            sobjecttype: sobjecttype.clone(),
             fields: HashMap::new(),
         }
     }
@@ -209,7 +210,8 @@ impl SObject {
 
         // Validate that the provided value matches the type of this field
         // and satisfies any constraints we can check locally.
-        if describe.soap_type != val.get_soap_type() {
+        let soap_type = val.get_soap_type();
+        if describe.soap_type != soap_type && soap_type != SoapType::Any {
             Err(SalesforceError::SchemaError(format!(
                 "Wrong type of value ({:?}) for field {}.{} (type {:?})",
                 val.get_soap_type(),
@@ -246,7 +248,7 @@ impl SObject {
 
     pub(crate) fn from_csv(
         rec: &HashMap<String, String>,
-        sobjecttype: &Arc<SObjectType>,
+        sobjecttype: &SObjectType,
     ) -> Result<SObject> {
         let mut ret = SObject::new(sobjecttype);
 
@@ -265,10 +267,9 @@ impl SObject {
         Ok(ret)
     }
 
-    pub fn from_json(value: &serde_json::Value, sobjecttype: &Arc<SObjectType>) -> Result<SObject> {
-        let mut ret = SObject::new(sobjecttype);
-
+    pub fn from_json(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<SObject> {
         if let serde_json::Value::Object(content) = value {
+            let mut ret = SObject::new(sobjecttype);
             for k in content.keys() {
                 // Get the describe for this field.
                 if k != "attributes" {
@@ -280,13 +281,12 @@ impl SObject {
                     )?;
                 }
             }
+            Ok(ret)
         } else {
-            return Err(Error::new(SalesforceError::GeneralError(
+            Err(Error::new(SalesforceError::GeneralError(
                 "Invalid record JSON".to_string(),
-            )));
+            )))
         }
-
-        Ok(ret)
     }
 
     pub(crate) fn to_json(&self) -> serde_json::Value {
@@ -322,7 +322,13 @@ impl From<&FieldValue> for serde_json::Value {
 
 impl From<&FieldValue> for String {
     fn from(f: &FieldValue) -> String {
-        match f {
+        f.as_string()
+    }
+}
+
+impl FieldValue {
+    pub fn as_string(&self) -> String {
+        match self {
             FieldValue::Integer(i) => format!("{}", i),
             FieldValue::Double(i) => format!("{}", i),
             FieldValue::Boolean(i) => format!("{}", i),
@@ -334,9 +340,7 @@ impl From<&FieldValue> for String {
             FieldValue::Null => "".to_string(),
         }
     }
-}
 
-impl FieldValue {
     fn from_json(value: &serde_json::Value, soap_type: SoapType) -> Result<FieldValue> {
         match soap_type {
             SoapType::Address | SoapType::Any | SoapType::Blob => panic!("Not supported"),
@@ -387,14 +391,34 @@ impl FieldValue {
 }
 
 #[derive(Debug)]
-pub struct SObjectType {
+pub struct SObjectTypeBody {
     api_name: String,
     describe: SObjectDescribe,
 }
 
+pub struct SObjectType(Arc<SObjectTypeBody>);
+
+impl Deref for SObjectType {
+    type Target = Arc<SObjectTypeBody>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Clone for SObjectType {
+    fn clone(&self) -> Self {
+        SObjectType {
+            0: Arc::clone(&self.0),
+        }
+    }
+}
+
 impl SObjectType {
     pub fn new(api_name: String, describe: SObjectDescribe) -> SObjectType {
-        SObjectType { api_name, describe }
+        SObjectType {
+            0: Arc::new(SObjectTypeBody { api_name, describe }),
+        }
     }
 
     pub fn get_describe(&self) -> &SObjectDescribe {
