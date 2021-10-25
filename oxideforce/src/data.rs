@@ -1,22 +1,24 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::error::Error;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::rc::Rc;
+use std::ops::Deref;
+use std::sync::Arc;
 
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 
 use super::errors::SalesforceError;
 
-#[serde(try_from = "&str")]
-#[derive(Deserialize)]
+use anyhow::{Error, Result};
+
+#[derive(Serialize, Deserialize, Copy, Clone)]
+#[serde(try_from = "String")]
 pub struct SalesforceId {
     id: [u8; 18],
 }
 
 impl SalesforceId {
     pub fn new(id: &str) -> Result<SalesforceId, SalesforceError> {
-        const ALNUMS: &[u8] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345".as_bytes();
+        const ALNUMS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
 
         if id.len() != 15 && id.len() != 18 {
             return Err(SalesforceError::InvalidIdError(id.to_string()));
@@ -44,11 +46,19 @@ impl SalesforceId {
     }
 }
 
+impl TryFrom<String> for SalesforceId {
+    type Error = SalesforceError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        SalesforceId::new(&value)
+    }
+}
+
 impl TryFrom<&str> for SalesforceId {
     type Error = SalesforceError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        SalesforceId::new(value)
+        SalesforceId::new(&value)
     }
 }
 
@@ -74,6 +84,7 @@ pub enum FieldValue {
     Time(String),
     Date(String),
     Id(SalesforceId),
+    Null,
 }
 
 impl FieldValue {
@@ -141,6 +152,14 @@ impl FieldValue {
         }
     }
 
+    pub fn is_null(&self) -> bool {
+        if let FieldValue::Null = &self {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn get_soap_type(&self) -> SoapType {
         match &self {
             FieldValue::Integer(_) => SoapType::Integer,
@@ -151,47 +170,64 @@ impl FieldValue {
             FieldValue::Time(_) => SoapType::Time,
             FieldValue::Date(_) => SoapType::Date,
             FieldValue::Id(_) => SoapType::Id,
+            _ => SoapType::Any, // TODO: this is probably not an optimal solution for nulls.
+        }
+    }
+
+    pub fn from_str(input: &str, field_type: &SoapType) -> Result<FieldValue> {
+        match field_type {
+            SoapType::Integer => Ok(FieldValue::Integer(input.parse()?)),
+            SoapType::Double => Ok(FieldValue::Double(input.parse()?)),
+            SoapType::Boolean => Ok(FieldValue::Boolean(input.parse()?)),
+            SoapType::String => Ok(FieldValue::String(input.to_owned())),
+            SoapType::DateTime => Ok(FieldValue::DateTime(input.to_owned())),
+            SoapType::Time => Ok(FieldValue::Time(input.to_owned())),
+            SoapType::Date => Ok(FieldValue::Date(input.to_owned())),
+            SoapType::Id => Ok(FieldValue::Id(input.try_into()?)),
+            _ => panic!("Unsupported type"), // TODO
         }
     }
 }
 
-#[derive(Debug)]
 pub struct SObject {
-    pub sobjecttype: Rc<SObjectType>,
+    pub sobjecttype: SObjectType,
     pub fields: HashMap<String, FieldValue>,
 }
 
 impl SObject {
-    pub fn new(sobjecttype: &Rc<SObjectType>) -> SObject {
+    pub fn new(sobjecttype: &SObjectType) -> SObject {
         SObject {
-            sobjecttype: Rc::clone(sobjecttype),
+            sobjecttype: sobjecttype.clone(),
             fields: HashMap::new(),
         }
     }
 
-    pub fn put(&mut self, key: &str, val: FieldValue) -> Result<(), Box<dyn Error>> {
+    pub fn put(&mut self, key: &str, val: FieldValue) -> Result<()> {
         // Locate the describe for this field.
         let describe = self.sobjecttype.get_describe().get_field(key);
 
         if describe.is_none() {
-            return Err(Box::new(SalesforceError::SchemaError(format!(
+            return Err(SalesforceError::SchemaError(format!(
                 "Field {} does not exist or is not accessible",
                 key
-            ))));
+            ))
+            .into());
         }
 
         let describe = describe.unwrap();
 
         // Validate that the provided value matches the type of this field
         // and satisfies any constraints we can check locally.
-        if describe.soap_type != val.get_soap_type() {
-            Err(Box::new(SalesforceError::SchemaError(format!(
+        let soap_type = val.get_soap_type();
+        if describe.soap_type != soap_type && soap_type != SoapType::Any {
+            Err(SalesforceError::SchemaError(format!(
                 "Wrong type of value ({:?}) for field {}.{} (type {:?})",
                 val.get_soap_type(),
                 self.sobjecttype.get_api_name(),
                 key,
                 describe.soap_type
-            ))))
+            ))
+            .into())
         } else {
             self.fields.insert(key.to_lowercase(), val);
             Ok(())
@@ -213,17 +249,184 @@ impl SObject {
     pub fn get_binary_blob(&self, key: &str) {
         unimplemented!();
     }
+
+    pub fn has_reference_parameters(&self) -> bool {
+        false
+    }
+
+    pub(crate) fn from_csv(
+        rec: &HashMap<String, String>,
+        sobjecttype: &SObjectType,
+    ) -> Result<SObject> {
+        let mut ret = SObject::new(sobjecttype);
+
+        for k in rec.keys() {
+            // Get the describe for this field.
+            if k != "attributes" {
+                let describe = sobjecttype.get_describe().get_field(k).unwrap();
+
+                ret.put(
+                    k,
+                    FieldValue::from_str(rec.get(k).unwrap(), &describe.soap_type)?,
+                )?;
+            }
+        }
+
+        Ok(ret)
+    }
+
+    pub fn from_json(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<SObject> {
+        if let serde_json::Value::Object(content) = value {
+            let mut ret = SObject::new(sobjecttype);
+            for k in content.keys() {
+                // Get the describe for this field.
+                if k != "attributes" {
+                    let describe = sobjecttype.get_describe().get_field(k).unwrap();
+
+                    ret.put(
+                        k,
+                        FieldValue::from_json(value.get(k).unwrap(), describe.soap_type)?,
+                    )?;
+                }
+            }
+            Ok(ret)
+        } else {
+            Err(Error::new(SalesforceError::GeneralError(
+                "Invalid record JSON".to_string(),
+            )))
+        }
+    }
+
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+
+        for (k, v) in self.fields.iter() {
+            map.insert(k.to_string(), v.into());
+        }
+
+        serde_json::Value::Object(map)
+    }
+}
+
+impl From<&FieldValue> for serde_json::Value {
+    fn from(f: &FieldValue) -> serde_json::Value {
+        match f {
+            FieldValue::Integer(i) => {
+                serde_json::Value::Number(serde_json::Number::from_f64(*i as f64).unwrap())
+            }
+            FieldValue::Double(i) => {
+                serde_json::Value::Number(serde_json::Number::from_f64(*i).unwrap())
+            }
+            FieldValue::Boolean(i) => serde_json::Value::Bool(*i),
+            FieldValue::String(i) => serde_json::Value::String(i.clone()),
+            FieldValue::DateTime(i) => serde_json::Value::String(i.clone()),
+            FieldValue::Time(i) => serde_json::Value::String(i.clone()),
+            FieldValue::Date(i) => serde_json::Value::String(i.clone()),
+            FieldValue::Id(i) => serde_json::Value::String(i.to_string()),
+            FieldValue::Null => serde_json::Value::Null,
+        }
+    }
+}
+
+impl From<&FieldValue> for String {
+    fn from(f: &FieldValue) -> String {
+        f.as_string()
+    }
+}
+
+impl FieldValue {
+    pub fn as_string(&self) -> String {
+        match self {
+            FieldValue::Integer(i) => format!("{}", i),
+            FieldValue::Double(i) => format!("{}", i),
+            FieldValue::Boolean(i) => format!("{}", i),
+            FieldValue::String(i) => i.clone(),
+            FieldValue::DateTime(i) => i.clone(),
+            FieldValue::Time(i) => i.clone(),
+            FieldValue::Date(i) => i.clone(),
+            FieldValue::Id(i) => i.to_string(),
+            FieldValue::Null => "".to_string(),
+        }
+    }
+
+    fn from_json(value: &serde_json::Value, soap_type: SoapType) -> Result<FieldValue> {
+        match soap_type {
+            SoapType::Address | SoapType::Any | SoapType::Blob => panic!("Not supported"),
+            SoapType::Boolean => {
+                if let serde_json::Value::Bool(b) = value {
+                    return Ok(FieldValue::Boolean(*b));
+                }
+            }
+            SoapType::Date => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::Date(b.to_string()));
+                }
+            }
+            SoapType::DateTime => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::DateTime(b.to_string()));
+                }
+            }
+            SoapType::Time => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::Time(b.to_string()));
+                }
+            }
+            SoapType::Double => {
+                if let serde_json::Value::Number(b) = value {
+                    return Ok(FieldValue::Double(b.as_f64().unwrap()));
+                }
+            }
+            SoapType::Integer => {
+                if let serde_json::Value::Number(b) = value {
+                    return Ok(FieldValue::Integer(b.as_i64().unwrap()));
+                }
+            }
+            SoapType::Id => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::Id(SalesforceId::new(b)?));
+                }
+            }
+            SoapType::String => {
+                if let serde_json::Value::String(b) = value {
+                    return Ok(FieldValue::String(b.to_string()));
+                }
+            }
+        }
+
+        Err(SalesforceError::SchemaError("Unable to convert value from JSON".to_string()).into())
+    }
 }
 
 #[derive(Debug)]
-pub struct SObjectType {
+pub struct SObjectTypeBody {
     api_name: String,
     describe: SObjectDescribe,
 }
 
+pub struct SObjectType(Arc<SObjectTypeBody>);
+
+impl Deref for SObjectType {
+    type Target = Arc<SObjectTypeBody>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Clone for SObjectType {
+    fn clone(&self) -> Self {
+        SObjectType {
+            0: Arc::clone(&self.0),
+        }
+    }
+}
+
 impl SObjectType {
     pub fn new(api_name: String, describe: SObjectDescribe) -> SObjectType {
-        SObjectType { api_name, describe }
+        SObjectType {
+            0: Arc::new(SObjectTypeBody { api_name, describe }),
+        }
     }
 
     pub fn get_describe(&self) -> &SObjectDescribe {
@@ -443,6 +646,10 @@ mod test {
         assert_eq!(
             "01Q36000000RXX5EAO",
             SalesforceId::new("01Q36000000RXX5").unwrap().to_string()
+        );
+        assert_eq!(
+            "01Q36000000RXX5EAO",
+            SalesforceId::new("01Q36000000RXX5EAO").unwrap().to_string()
         );
         assert_eq!(
             "0013600001ohPTpAAM",
