@@ -2,16 +2,15 @@ use std::{
     collections::VecDeque,
     mem,
     pin::Pin,
-    stream::Stream,
     task::{Context, Poll},
 };
 
+use anyhow::Result;
 use reqwest::Method;
 use serde_derive::Deserialize;
 use serde_json::{Map, Value};
 use tokio::{spawn, task::JoinHandle};
-
-use anyhow::Result;
+use tokio_stream::Stream;
 
 use crate::{api::SalesforceRequest, Connection, SObject, SObjectType};
 
@@ -119,6 +118,7 @@ impl Stream for QueryStream {
                     let connection = self.conn.clone();
 
                     if let Some(next_url) = next_url {
+                        // TODO: how do we poll and retrieve the result of this task?
                         self.retrieve_task = Some(spawn(async move {
                             let request_url = format!("{}/{}", connection.instance_url, next_url);
 
@@ -131,6 +131,10 @@ impl Stream for QueryStream {
                                 .await?)
                         }));
                     }
+                } else {
+                    // We have a task waiting already.
+                    //let fut = Pin::new(&self.retrieve_task.unwrap());
+                    //let poll = fut.poll();
                 }
 
                 Poll::Pending
