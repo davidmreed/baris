@@ -11,7 +11,7 @@ use super::errors::SalesforceError;
 use anyhow::{Error, Result};
 
 #[derive(Serialize, Deserialize, Copy, Clone)]
-#[serde(try_from = "&str")]
+#[serde(try_from = "String")]
 pub struct SalesforceId {
     id: [u8; 18],
 }
@@ -46,11 +46,19 @@ impl SalesforceId {
     }
 }
 
+impl TryFrom<String> for SalesforceId {
+    type Error = SalesforceError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        SalesforceId::new(&value)
+    }
+}
+
 impl TryFrom<&str> for SalesforceId {
     type Error = SalesforceError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        SalesforceId::new(value)
+        SalesforceId::new(&value)
     }
 }
 

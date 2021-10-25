@@ -85,7 +85,7 @@ impl Connection {
     }
 
     pub fn get_base_url(&self) -> String {
-        format!("{}/services/data/{}", self.instance_url, self.api_version)
+        format!("{}services/data/{}", self.instance_url, self.api_version)
     }
 
     pub async fn get_type(&self, type_name: &str) -> Result<SObjectType> {
@@ -116,6 +116,7 @@ impl Connection {
         K: SalesforceRequest<ReturnValue = T>,
     {
         let url = format!("{}{}", self.get_base_url(), request.get_url());
+        println!("I have URL {}", url);
         let mut builder = self.client.request(request.get_method(), &url);
         let method = request.get_method();
 
@@ -130,6 +131,9 @@ impl Connection {
         }
 
         let result = builder.send().await?.json().await?;
+        // TODO: interpret common errors here, such as not found and access token expired.
+
+        println!("I received {:?}", result);
 
         Ok(request.get_result(&self, &result)?)
     }

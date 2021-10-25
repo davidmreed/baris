@@ -12,7 +12,7 @@ async fn main() -> Result<()> {
     let instance_url = env::var("INSTANCE_URL")?;
     let args: Vec<String> = env::args().collect();
     let conn = Connection::new(&sid, &instance_url, "v52.0")?;
-    let sobject_type = conn.get_type(&args[1]).await.unwrap();
+    let sobject_type = conn.get_type(&args[1]).await?;
 
     match args[2].as_str() {
         "query" => {
