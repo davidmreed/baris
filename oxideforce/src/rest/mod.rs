@@ -137,7 +137,7 @@ impl Error for DmlError {}
 
 // SObject Update Requests
 
-struct SObjectUpdateRequest {
+pub struct SObjectUpdateRequest {
     sobject: SObject,
 }
 
@@ -246,12 +246,12 @@ impl CompositeFriendlyRequest for SObjectUpsertRequest {}
 
 // SObject Delete Requests
 
-struct SObjectDeleteRequest {
+pub struct SObjectDeleteRequest {
     sobject: SObject,
 }
 
 impl SObjectDeleteRequest {
-    fn new(sobject: SObject) -> Result<SObjectDeleteRequest> {
+    pub fn new(sobject: SObject) -> Result<SObjectDeleteRequest> {
         if let Some(_) = sobject.get_id() {
             Ok(SObjectDeleteRequest { sobject })
         } else {
@@ -290,7 +290,7 @@ pub struct SObjectRetrieveRequest {
 }
 
 impl SObjectRetrieveRequest {
-    fn new(id: SalesforceId, sobject_type: &SObjectType) -> SObjectRetrieveRequest {
+    pub fn new(id: SalesforceId, sobject_type: &SObjectType) -> SObjectRetrieveRequest {
         SObjectRetrieveRequest {
             id,
             sobject_type: sobject_type.clone(),

@@ -2,8 +2,10 @@ use std::env;
 
 use anyhow::Result;
 use oxideforce::rest::query::QueryRequest;
-use oxideforce::rest::SObjectCreateRequest;
-use oxideforce::{Connection, FieldValue, SObject};
+use oxideforce::rest::{
+    SObjectCreateRequest, SObjectDeleteRequest, SObjectUpdateRequest, SObjectUpsertRequest,
+};
+use oxideforce::{Connection, FieldValue, SObject, SalesforceId};
 use tokio_stream::StreamExt;
 
 #[tokio::main]
@@ -25,40 +27,40 @@ async fn main() -> Result<()> {
         }
         "create" => {
             let mut sobj = SObject::new(&sobject_type);
-
             sobj.put("Name", FieldValue::String(args[3].clone()))?;
-            let request = SObjectCreateRequest::new(sobj)?;
 
-            let result = conn.execute(&request).await?;
+            let result = conn.execute(&SObjectCreateRequest::new(sobj)?).await?;
 
             println!("Created {} {:?}", &args[1], result);
-        } /*
+        }
         "update" => {
-        let mut sobj = SObject::new(&sobjecttype);
+            let mut sobj = SObject::new(&sobject_type);
 
-        sobj.put("Id", FieldValue::Id(SalesforceId::new(&args[3])?))?;
-        sobj.put("Name", FieldValue::String(args[4].clone()))?;
-        conn.update(&mut sobj)?;
+            sobj.put("Id", FieldValue::Id(SalesforceId::new(&args[3])?))?;
+            sobj.put("Name", FieldValue::String(args[4].clone()))?;
+            let result = conn.execute(&SObjectUpdateRequest::new(sobj)?).await?;
 
-        println!("Created {} {}", &args[1], sobj.get_id().unwrap());
+            println!("Created {} {:?}", &args[1], result);
         }
         "upsert" => {
-        let mut sobj = SObject::new(&sobjecttype);
+            let mut sobj = SObject::new(&sobject_type);
 
-        sobj.put(&args[3], FieldValue::String(args[4].clone()))?;
-        sobj.put("Name", FieldValue::String(args[5].clone()))?;
-        conn.upsert(&mut sobj, &args[3])?;
+            sobj.put(&args[3], FieldValue::String(args[4].clone()))?;
+            sobj.put("Name", FieldValue::String(args[5].clone()))?;
+            let result = conn
+                .execute(&SObjectUpsertRequest::new(sobj, &args[3])?)
+                .await?;
 
-        println!("Upserted {} {}", &args[1], sobj.get_id().unwrap());
+            println!("Upserted {} {:?}", &args[1], result);
         }
         "delete" => {
-        let mut sobj = SObject::new(&sobjecttype);
+            let mut sobj = SObject::new(&sobject_type);
 
-        sobj.put("Id", FieldValue::Id(SalesforceId::new(&args[3])?))?;
-        conn.delete(sobj)?;
+            sobj.put("Id", FieldValue::Id(SalesforceId::new(&args[3])?))?;
+            let result = conn.execute(&SObjectDeleteRequest::new(sobj)?).await?;
 
-        println!("Deleted {} {}", &args[1], &args[3]);
-        }*/
+            println!("Deleted {} {}", &args[1], &args[3]);
+        }
         _ => {
             println!("Unknown operation");
         }
