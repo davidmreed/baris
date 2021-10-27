@@ -9,6 +9,7 @@ use anyhow::Result;
 use reqwest::Method;
 use serde_derive::Deserialize;
 use serde_json::{Map, Value};
+use std::future::Future;
 use tokio::{spawn, task::JoinHandle};
 use tokio_stream::Stream;
 
@@ -101,49 +102,85 @@ impl QueryStream {
             yielded: 0,
         })
     }
+
+    fn try_to_yield(&mut self) -> Option<SObject> {
+        if let Some(buffer) = &mut self.buffer {
+            if let Some(item) = buffer.pop_front() {
+                self.yielded += 1;
+                Some(item)
+            } else {
+                self.buffer = None;
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn process_query_result(&mut self, result: QueryResult) -> Result<()> {
+        self.buffer = Some(
+            result
+                .records
+                .iter()
+                .map(|r| SObject::from_json(r, &self.sobject_type))
+                .collect::<Result<VecDeque<SObject>>>()?,
+        );
+        self.done = result.done;
+        self.next_records_url = result.next_records_url;
+
+        Ok(())
+    }
 }
 
 impl Stream for QueryStream {
     type Item = Result<SObject>;
 
-    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(buffer) = &mut self.buffer {
-            if let Some(item) = buffer.pop_front() {
-                self.yielded += 1;
-                Poll::Ready(Some(Ok(item)))
-            } else {
-                self.buffer = None;
-                if self.retrieve_task.is_none() {
-                    let next_url = mem::take(&mut self.next_records_url);
-                    let connection = self.conn.clone();
-
-                    if let Some(next_url) = next_url {
-                        // TODO: how do we poll and retrieve the result of this task?
-                        self.retrieve_task = Some(spawn(async move {
-                            let request_url = format!("{}/{}", connection.instance_url, next_url);
-
-                            Ok(connection
-                                .client
-                                .get(&request_url)
-                                .send()
-                                .await?
-                                .json()
-                                .await?)
-                        }));
-                    }
-                } else {
-                    // We have a task waiting already.
-                    //let fut = Pin::new(&self.retrieve_task.unwrap());
-                    //let poll = fut.poll();
-                }
-
-                Poll::Pending
-            }
-        } else if self.done {
-            Poll::Ready(None)
-        } else {
-            Poll::Pending
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // First, check if we have sObjects ready to yield.
+        if let Some(sobject) = self.try_to_yield() {
+            return Poll::Ready(Some(Ok(sobject)));
         }
+        // Check if we have a running task that is ready to yield a new buffer.
+        if let Some(task) = &mut self.retrieve_task {
+            // We have a task waiting already.
+            let fut = unsafe { Pin::new_unchecked(task) };
+            let poll = fut.poll(cx);
+            if let Poll::Ready(result) = poll {
+                self.process_query_result(result??)?;
+
+                self.retrieve_task = None;
+
+                if let Some(sobject) = self.try_to_yield() {
+                    return Poll::Ready(Some(Ok(sobject)));
+                } // TODO: could this buffer ever be empty?
+            }
+        }
+
+        // Do we have a next records URL?
+        if let Some(next_url) = mem::take(&mut self.next_records_url) {
+            let connection = self.conn.clone();
+
+            self.retrieve_task = Some(spawn(async move {
+                let request_url = format!("{}/{}", connection.instance_url, next_url);
+
+                Ok(connection
+                    .client
+                    .get(&request_url)
+                    .send()
+                    .await?
+                    .json()
+                    .await?)
+            }));
+            return Poll::Pending;
+        }
+
+        // If we are done, return a sigil.
+        if self.done {
+            return Poll::Ready(None);
+        }
+
+        // TODO: we should never reach this point.
+        return Poll::Pending;
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

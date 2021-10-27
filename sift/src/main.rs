@@ -57,7 +57,7 @@ async fn main() -> Result<()> {
             let mut sobj = SObject::new(&sobject_type);
 
             sobj.put("Id", FieldValue::Id(SalesforceId::new(&args[3])?))?;
-            let result = conn.execute(&SObjectDeleteRequest::new(sobj)?).await?;
+            conn.execute(&SObjectDeleteRequest::new(sobj)?).await?;
 
             println!("Deleted {} {}", &args[1], &args[3]);
         }
