@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     future::Future,
+    mem,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -11,51 +12,60 @@ use tokio_stream::Stream;
 
 use crate::SObject;
 
-trait BufferedLocatorManager {
+pub(crate) trait BufferedLocatorManager {
     fn get_next_future(
         &mut self,
-        state: Option<&BufferedLocatorStreamState>,
+        state: Option<BufferedLocatorStreamState>,
     ) -> JoinHandle<Result<BufferedLocatorStreamState>>;
 }
 
-struct BufferedLocatorStreamState {
-    buffer: VecDeque<SObject>,
-    locator: Option<String>,
-    total_size: Option<usize>,
-    done: bool,
+pub(crate) struct BufferedLocatorStreamState {
+    pub buffer: VecDeque<SObject>,
+    pub locator: Option<String>,
+    pub total_size: Option<usize>,
+    pub done: bool,
 }
 
 impl BufferedLocatorStreamState {
-    pub fn new(buffer: VecDeque<SObject>, locator: Option<String>, total_size: Option<usize>, done: bool) -> BufferedLocatorStreamState {
+    pub fn new(
+        buffer: VecDeque<SObject>,
+        locator: Option<String>,
+        total_size: Option<usize>,
+        done: bool,
+    ) -> BufferedLocatorStreamState {
         BufferedLocatorStreamState {
-            buffer, locator, total_size, done
+            buffer,
+            locator,
+            total_size,
+            done,
         }
     }
 }
 
-struct BufferedLocatorStream
-{
+pub struct BufferedLocatorStream {
     manager: Box<dyn BufferedLocatorManager>,
     state: Option<BufferedLocatorStreamState>,
     yielded: usize,
-    error: Option<Error>,
+    error: Option<Error>, // TODO
     retrieve_task: Option<JoinHandle<Result<BufferedLocatorStreamState>>>,
 }
 
 impl BufferedLocatorStream {
-    fn new(initial_values: Option<BufferedLocatorStreamState>,  manager: Box<dyn BufferedLocatorManager>) -> Result<Self> {
-
-        Ok(BufferedLocatorStream {
+    pub(crate) fn new(
+        initial_values: Option<BufferedLocatorStreamState>,
+        manager: Box<dyn BufferedLocatorManager>,
+    ) -> Self {
+        BufferedLocatorStream {
             manager,
             state: initial_values,
             retrieve_task: None,
             yielded: 0,
             error: None,
-        })
+        }
     }
 
-    fn try_to_yield(&mut self, state: Option<&mut BufferedLocatorStreamState>) -> Option<SObject> {
-        if let Some(state) = state {
+    fn try_to_yield(&mut self) -> Option<SObject> {
+        if let Some(state) = &mut self.state {
             if let Some(item) = state.buffer.pop_front() {
                 self.yielded += 1;
                 Some(item)
@@ -74,17 +84,15 @@ impl Stream for BufferedLocatorStream {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
             // First, check if we have sObjects ready to yield.
-            if let Some(sobject) = self.try_to_yield((&mut self.state).as_mut()) {
+            let sobject = self.try_to_yield();
+            if let Some(sobject) = sobject {
                 return Poll::Ready(Some(Ok(sobject)));
-            }
-
-            // Check if we have a running task that is ready to yield a new state.
-            if let Some(task) = &mut self.retrieve_task {
+            } else if let Some(task) = &mut self.retrieve_task {
                 // We have a task waiting already.
                 let fut = unsafe { Pin::new_unchecked(task) };
                 let poll = fut.poll(cx);
                 if let Poll::Ready(result) = poll {
-                    self.state = Some(result?);
+                    self.state = Some(result??);
 
                     self.retrieve_task = None;
                 } else {
@@ -94,10 +102,11 @@ impl Stream for BufferedLocatorStream {
                 if state.done {
                     // If we are done, return a sigil.
                     return Poll::Ready(None);
-                } else {
-                    // Create a new task to get the next state.
-                    self.retrieve_task = Some(self.manager.get_next_future(Some(&state)));
                 }
+            } else {
+                // Create a new task to get the next state.
+                let state = mem::take(&mut self.state);
+                self.retrieve_task = Some(self.manager.get_next_future(state));
             }
         }
     }

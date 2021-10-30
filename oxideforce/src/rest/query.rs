@@ -1,19 +1,16 @@
-use std::{
-    collections::VecDeque,
-    mem,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::collections::VecDeque;
 
 use anyhow::Result;
 use reqwest::Method;
 use serde_derive::Deserialize;
 use serde_json::{Map, Value};
-use std::future::Future;
 use tokio::{spawn, task::JoinHandle};
-use tokio_stream::Stream;
 
-use crate::{api::SalesforceRequest, Connection, SObject, SObjectType};
+use crate::{
+    api::SalesforceRequest,
+    streams::{BufferedLocatorManager, BufferedLocatorStream, BufferedLocatorStreamState},
+    Connection, SObject, SObjectType,
+};
 
 pub struct QueryRequest {
     query: String,
@@ -32,7 +29,7 @@ impl QueryRequest {
 }
 
 impl SalesforceRequest for QueryRequest {
-    type ReturnValue = QueryStream;
+    type ReturnValue = BufferedLocatorStream;
 
     fn get_query_parameters(&self) -> Option<Value> {
         let mut hm = Map::new();
@@ -55,11 +52,16 @@ impl SalesforceRequest for QueryRequest {
     }
 
     fn get_result(&self, conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
-        Ok(QueryStream::new(
-            serde_json::from_value::<QueryResult>(body.clone())?,
-            conn,
-            &self.sobject_type,
-        )?)
+        Ok(BufferedLocatorStream::new(
+            Some(
+                serde_json::from_value::<QueryResult>(body.clone())?
+                    .to_locator_stream_state(&self.sobject_type)?,
+            ),
+            Box::new(QueryStreamLocatorManager {
+                conn: conn.clone(),
+                sobject_type: self.sobject_type.clone(),
+            }),
+        ))
     }
 }
 
@@ -72,34 +74,46 @@ struct QueryResult {
     next_records_url: Option<String>,
 }
 
-pub struct QueryStream {
+impl QueryResult {
+    pub fn to_locator_stream_state(
+        self,
+        sobject_type: &SObjectType,
+    ) -> Result<BufferedLocatorStreamState> {
+        Ok(BufferedLocatorStreamState::new(
+            self.records
+                .iter()
+                .map(|r| SObject::from_json(r, sobject_type))
+                .collect::<Result<VecDeque<SObject>>>()?,
+            self.next_records_url,
+            Some(self.total_size),
+            self.done,
+        ))
+    }
+}
+
+struct QueryStreamLocatorManager {
     conn: Connection,
     sobject_type: SObjectType,
-    stream: BufferedLocatorStream
 }
 
-impl BufferedLocatorManager for QueryStream {
-    fn get_next_future(&mut self, state: Option<&BufferedLocatorStreamState>) -> JoinHandle<Result<BufferedLocatorStreamState>> {
-        todo!();
+impl BufferedLocatorManager for QueryStreamLocatorManager {
+    fn get_next_future(
+        &mut self,
+        state: Option<BufferedLocatorStreamState>,
+    ) -> JoinHandle<Result<BufferedLocatorStreamState>> {
+        let conn = self.conn.clone();
+        let sobject_type = self.sobject_type.clone();
+
+        spawn(async move {
+            let result: QueryResult = conn
+                .client
+                .get(state.unwrap().locator.unwrap())
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            Ok(result.to_locator_stream_state(&sobject_type)?)
+        })
     }
 }
-
-impl QueryStream {
-    fn new(result: QueryResult, conn: &Connection, sobject_type: &SObjectType) -> Result<Self> {
-    }
-
-    fn process_query_result(&mut self, result: QueryResult) -> Result<()> {
-        self.buffer = Some(
-            result
-                .records
-                .iter()
-                .map(|r| SObject::from_json(r, &self.sobject_type))
-                .collect::<Result<VecDeque<SObject>>>()?,
-        );
-        self.done = result.done;
-        self.next_records_url = result.next_records_url;
-
-        Ok(())
-    }
-}
-
