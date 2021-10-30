@@ -11,13 +11,11 @@ use tokio_stream::Stream;
 
 use crate::SObject;
 
-trait BufferedLocatorManager<R> {
+trait BufferedLocatorManager {
     fn get_next_future(
         &mut self,
         state: Option<&BufferedLocatorStreamState>,
-    ) -> JoinHandle<Result<R>>;
-
-    fn ingest_result(&mut self, result: &R) -> Result<BufferedLocatorStreamState>;
+    ) -> JoinHandle<Result<BufferedLocatorStreamState>>;
 }
 
 struct BufferedLocatorStreamState {
@@ -27,37 +25,32 @@ struct BufferedLocatorStreamState {
     done: bool,
 }
 
-struct BufferedLocatorStream<T, R>
-where
-    T: BufferedLocatorManager<R>,
-    R: Send,
+impl BufferedLocatorStreamState {
+    pub fn new(buffer: VecDeque<SObject>, locator: Option<String>, total_size: Option<usize>, done: bool) -> BufferedLocatorStreamState {
+        BufferedLocatorStreamState {
+            buffer, locator, total_size, done
+        }
+    }
+}
+
+struct BufferedLocatorStream
 {
-    manager: T,
+    manager: Box<dyn BufferedLocatorManager>,
     state: Option<BufferedLocatorStreamState>,
     yielded: usize,
     error: Option<Error>,
-    retrieve_task: Option<JoinHandle<Result<R>>>,
+    retrieve_task: Option<JoinHandle<Result<BufferedLocatorStreamState>>>,
 }
 
-impl<T: BufferedLocatorManager<R>, R: Send> BufferedLocatorStream<T, R> {
-    fn new(initial_values: Option<R>, mut manager: T) -> Result<Self> {
-        let retrieve_task = if let None = initial_values {
-            Some(manager.get_next_future(None))
-        } else {
-            None
-        };
-        let state = if let Some(iv) = initial_values {
-            Some(manager.ingest_result(&iv)?)
-        } else {
-            None
-        };
+impl BufferedLocatorStream {
+    fn new(initial_values: Option<BufferedLocatorStreamState>,  manager: Box<dyn BufferedLocatorManager>) -> Result<Self> {
 
         Ok(BufferedLocatorStream {
             manager,
-            retrieve_task,
+            state: initial_values,
+            retrieve_task: None,
             yielded: 0,
             error: None,
-            state,
         })
     }
 
@@ -75,7 +68,7 @@ impl<T: BufferedLocatorManager<R>, R: Send> BufferedLocatorStream<T, R> {
     }
 }
 
-impl<T: BufferedLocatorManager<R>, R: Send> Stream for BufferedLocatorStream<T, R> {
+impl Stream for BufferedLocatorStream {
     type Item = Result<SObject>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -91,7 +84,7 @@ impl<T: BufferedLocatorManager<R>, R: Send> Stream for BufferedLocatorStream<T, 
                 let fut = unsafe { Pin::new_unchecked(task) };
                 let poll = fut.poll(cx);
                 if let Poll::Ready(result) = poll {
-                    self.state = Some(self.manager.ingest_result(&result??)?);
+                    self.state = Some(result?);
 
                     self.retrieve_task = None;
                 } else {
@@ -105,8 +98,6 @@ impl<T: BufferedLocatorManager<R>, R: Send> Stream for BufferedLocatorStream<T, 
                     // Create a new task to get the next state.
                     self.retrieve_task = Some(self.manager.get_next_future(Some(&state)));
                 }
-            } else {
-                panic!("invalid situation: no state or future"); // TODO: error handling.
             }
         }
     }

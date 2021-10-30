@@ -75,46 +75,17 @@ struct QueryResult {
 pub struct QueryStream {
     conn: Connection,
     sobject_type: SObjectType,
-    buffer: Option<VecDeque<SObject>>,
-    retrieve_task: Option<JoinHandle<Result<QueryResult>>>,
-    next_records_url: Option<String>,
-    total_size: usize,
-    yielded: usize,
-    done: bool,
+    stream: BufferedLocatorStream
+}
+
+impl BufferedLocatorManager for QueryStream {
+    fn get_next_future(&mut self, state: Option<&BufferedLocatorStreamState>) -> JoinHandle<Result<BufferedLocatorStreamState>> {
+        todo!();
+    }
 }
 
 impl QueryStream {
     fn new(result: QueryResult, conn: &Connection, sobject_type: &SObjectType) -> Result<Self> {
-        Ok(QueryStream {
-            buffer: Some(
-                result
-                    .records
-                    .iter()
-                    .map(|r| SObject::from_json(r, sobject_type))
-                    .collect::<Result<VecDeque<SObject>>>()?,
-            ),
-            retrieve_task: None,
-            next_records_url: result.next_records_url,
-            done: result.done,
-            total_size: result.total_size,
-            conn: conn.clone(),
-            sobject_type: sobject_type.clone(),
-            yielded: 0,
-        })
-    }
-
-    fn try_to_yield(&mut self) -> Option<SObject> {
-        if let Some(buffer) = &mut self.buffer {
-            if let Some(item) = buffer.pop_front() {
-                self.yielded += 1;
-                Some(item)
-            } else {
-                self.buffer = None;
-                None
-            }
-        } else {
-            None
-        }
     }
 
     fn process_query_result(&mut self, result: QueryResult) -> Result<()> {
@@ -132,61 +103,3 @@ impl QueryStream {
     }
 }
 
-impl Stream for QueryStream {
-    type Item = Result<SObject>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // First, check if we have sObjects ready to yield.
-        if let Some(sobject) = self.try_to_yield() {
-            return Poll::Ready(Some(Ok(sobject)));
-        }
-        // Check if we have a running task that is ready to yield a new buffer.
-        if let Some(task) = &mut self.retrieve_task {
-            // We have a task waiting already.
-            let fut = unsafe { Pin::new_unchecked(task) };
-            let poll = fut.poll(cx);
-            if let Poll::Ready(result) = poll {
-                self.process_query_result(result??)?;
-
-                self.retrieve_task = None;
-
-                if let Some(sobject) = self.try_to_yield() {
-                    return Poll::Ready(Some(Ok(sobject)));
-                } // TODO: could this buffer ever be empty?
-            }
-        }
-
-        // Do we have a next records URL?
-        if let Some(next_url) = mem::take(&mut self.next_records_url) {
-            let connection = self.conn.clone();
-
-            self.retrieve_task = Some(spawn(async move {
-                let request_url = format!("{}/{}", connection.instance_url, next_url);
-
-                Ok(connection
-                    .client
-                    .get(&request_url)
-                    .send()
-                    .await?
-                    .json()
-                    .await?)
-            }));
-            return Poll::Pending;
-        }
-
-        // If we are done, return a sigil.
-        if self.done {
-            return Poll::Ready(None);
-        }
-
-        // TODO: we should never reach this point.
-        return Poll::Pending;
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (
-            self.total_size - self.yielded,
-            Some(self.total_size - self.yielded),
-        )
-    }
-}
