@@ -1,6 +1,7 @@
 use std::env;
 
 use anyhow::Result;
+use oxideforce::bulk::v2::{BulkQueryJob, BulkQueryOperation};
 use oxideforce::rest::query::QueryRequest;
 use oxideforce::rest::{
     SObjectCreateRequest, SObjectDeleteRequest, SObjectUpdateRequest, SObjectUpsertRequest,
@@ -20,6 +21,18 @@ async fn main() -> Result<()> {
         "query" => {
             let request = QueryRequest::new(&sobject_type, &"SELECT Id FROM Account", false);
             let mut stream = conn.execute(&request).await?;
+
+            while let Some(sobj) = stream.next().await {
+                println!("I received sObject {:?}", sobj?.fields);
+            }
+        }
+        "bulk_query" => {
+            let request =
+                BulkQueryJob::new(&conn, &"SELECT Id FROM Account", BulkQueryOperation::Query)
+                    .await?;
+
+            request.complete(&conn).await?;
+            let mut stream = request.get_results_stream(&conn, &sobject_type).await;
 
             while let Some(sobj) = stream.next().await {
                 println!("I received sObject {:?}", sobj?.fields);
