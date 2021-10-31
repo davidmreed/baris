@@ -4,6 +4,7 @@ extern crate serde_derive;
 extern crate serde_json;
 
 use std::collections::HashMap;
+use std::mem;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -13,9 +14,10 @@ use super::errors::SalesforceError;
 use crate::rest::SObjectDescribeRequest;
 
 use anyhow::{Error, Result};
-use reqwest::{header, Client, Method};
+use reqwest::{header, Client, Method, Url};
 use serde_json::Value;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 
 pub trait SalesforceRequest {
     type ReturnValue;
@@ -38,13 +40,79 @@ pub trait SalesforceRequest {
     fn get_result(&self, conn: &Connection, body: &Value) -> Result<Self::ReturnValue>;
 }
 
-pub trait CompositeFriendlyRequest {}
+pub trait CompositeFriendlyRequest: SalesforceRequest {}
+
+struct ConnectedApp {
+    consumer_key: String,
+    client_secret: String,
+    redirect_url: Url,
+}
+
+impl ConnectedApp {
+    pub fn new(consumer_key: String, client_secret: String, redirect_url: Url) -> ConnectedApp {
+        ConnectedApp {
+            consumer_key,
+            client_secret,
+            redirect_url,
+        }
+    }
+}
+
+struct RefreshTokenAuth {
+    refresh_token: String,
+    access_token: Option<String>,
+    app: ConnectedApp,
+}
+
+impl RefreshTokenAuth {
+    pub async fn refresh_access_token(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+struct JwtAuth {
+    access_token: Option<String>,
+    app: ConnectedApp,
+    cert: String,
+}
+
+impl JwtAuth {
+    pub async fn refresh_access_token(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+enum AuthDetails {
+    AccessToken(String),
+    RefreshToken(RefreshTokenAuth),
+    Jwt(JwtAuth),
+}
+
+impl AuthDetails {
+    pub async fn refresh_access_token(&mut self) -> Result<()> {
+        match self {
+            AuthDetails::RefreshToken(tok) => tok.refresh_access_token(),
+            AuthDetails::Jwt(tok) => tok.refresh_access_token(),
+            AuthDetails::AccessToken(_) => Err(SalesforceError::CannotRefresh().into()),
+        }
+    }
+
+    pub fn get_access_token(&self) -> Option<String> {
+        match self {
+            AuthDetails::RefreshToken(tok) => tok.access_token,
+            AuthDetails::Jwt(tok) => tok.access_token,
+            AuthDetails::AccessToken(tok) => Some(tok),
+        }
+    }
+}
 
 pub struct ConnectionBody {
     pub(crate) instance_url: String,
     pub(crate) api_version: String,
     sobject_types: RwLock<HashMap<String, SObjectType>>,
     pub(crate) client: Client,
+    auth: RwLock<AuthDetails>,
+    auth_refresh: RwLock<Option<JoinHandle<()>>>,
 }
 
 pub struct Connection(Arc<ConnectionBody>);
@@ -86,6 +154,42 @@ impl Connection {
 
     pub fn get_base_url(&self) -> String {
         format!("{}services/data/{}", self.instance_url, self.api_version)
+    }
+
+    pub async fn get_access_token(&mut self) -> Result<String> {
+        // The sequence for auth token access goes like this:
+        // Attempt to get a lock on the auth structure.
+        // If this lock blocks, that means another thread is already
+        // attempting to refresh the token.
+        // If we obtain the lock and there is no token, attempt
+        // to start a token refresh, then recurse.
+        let access_token = self.auth.read().await;
+
+        let tok = access_token.get_access_token();
+        mem::drop(access_token);
+
+        if let Some(tok) = tok {
+            Ok(tok)
+        } else {
+            self.refresh_access_token().await?;
+            self.get_access_token().await
+        }
+    }
+
+    pub async fn refresh_access_token(&mut self) -> Result<()> {
+        // First, try to get a write lock on the auth struct.
+        // If we do not get the lock, get a read lock on the auth handle
+        // so that we can await until the update is complete.
+        // We don't want to do `write().await` because it would
+        // build up a queue of write lock contenders when this
+        // operation only needs to happen once.
+
+        // If we do get the lock, populate the auth handle with
+        // a Future.
+        let auth = self.auth.write().await;
+        let auth_handle = self.auth_refresh.write().await;
+
+        auth.refresh_access_token().await
     }
 
     pub async fn get_type(&self, type_name: &str) -> Result<SObjectType> {

@@ -1,4 +1,4 @@
-/*use serde_json::Value;
+use serde_json::Value;
 
 use crate::api::SalesforceRequest;
 
@@ -13,4 +13,3 @@ impl CompositeRequest {
 impl SalesforceRequest for CompositeRequest {
     type ReturnValue = Value;
 }
-*/

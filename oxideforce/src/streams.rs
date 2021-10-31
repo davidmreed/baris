@@ -20,7 +20,7 @@ pub(crate) trait BufferedLocatorManager {
 }
 
 pub(crate) struct BufferedLocatorStreamState {
-    pub buffer: VecDeque<SObject>,
+    pub buffer: VecDeque<SObject>, // TODO: we should decouple the buffer from the locator state to enable prefetching
     pub locator: Option<String>,
     pub total_size: Option<usize>,
     pub done: bool,
