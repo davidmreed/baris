@@ -186,10 +186,22 @@ impl Connection {
 
         // If we do get the lock, populate the auth handle with
         // a Future.
-        let auth = self.auth.write().await;
-        let auth_handle = self.auth_refresh.write().await;
+        let auth = self.auth.try_write(); // ... but what if someone has a read lock?
 
-        auth.refresh_access_token().await
+        if let Some(handle) = auth {
+            // Enqueue and await on the OAuth refresh.
+            self.auth_handle = Some(spawn(async {
+                self.auth.refresh_access_token().await
+            }));
+
+            self.auth_handle.await?;
+            self.auth_handle = None;
+        } else {
+            // Someone else is running the refresh.
+            let lock = self.auth_handle.read().await;
+
+            self.auth_handle.await?;
+        }
     }
 
     pub async fn get_type(&self, type_name: &str) -> Result<SObjectType> {
