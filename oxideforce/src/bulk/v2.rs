@@ -111,7 +111,11 @@ impl BufferedLocatorManager for BulkQueryLocatorManager {
         let job_id = *self.job;
 
         spawn(async move {
-            let url = format!("{}/jobs/query/{}/results", conn.get_base_url(), job_id);
+            let url = format!(
+                "{}/jobs/query/{}/results",
+                conn.get_base_url().await,
+                job_id
+            );
             let mut query = HashMap::new();
 
             query.insert("maxRecords", format!("{}", RESULTS_CHUNK_SIZE));
@@ -172,7 +176,7 @@ impl BulkQueryJob {
         query: &str,
         operation: BulkQueryOperation,
     ) -> Result<Self> {
-        let url = format!("{}/jobs/query", conn.get_base_url());
+        let url = format!("{}/jobs/query", conn.get_base_url().await);
 
         let result = conn
             .client
@@ -196,7 +200,11 @@ impl BulkQueryJob {
     pub async fn check_status(&self, conn: &Connection) -> Result<BulkQueryJobDetail> {
         Ok(conn
             .client
-            .get(&format!("{}/jobs/query/{}", conn.get_base_url(), &self.0))
+            .get(&format!(
+                "{}/jobs/query/{}",
+                conn.get_base_url().await,
+                &self.0
+            ))
             .send()
             .await?
             .json()

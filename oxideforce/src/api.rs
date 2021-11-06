@@ -11,13 +11,14 @@ use std::sync::Arc;
 use super::data::{SObjectDescribe, SObjectType};
 use super::errors::SalesforceError;
 
+use crate::auth::AuthDetails;
 use crate::rest::SObjectDescribeRequest;
 
 use anyhow::{Error, Result};
-use reqwest::{header, Client, Method, Url};
+use reqwest::{header, Client, Method};
 use serde_json::Value;
-use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
+use tokio::spawn;
+use tokio::sync::{broadcast, Mutex, RwLock};
 
 pub trait SalesforceRequest {
     type ReturnValue;
@@ -42,77 +43,12 @@ pub trait SalesforceRequest {
 
 pub trait CompositeFriendlyRequest: SalesforceRequest {}
 
-struct ConnectedApp {
-    consumer_key: String,
-    client_secret: String,
-    redirect_url: Url,
-}
-
-impl ConnectedApp {
-    pub fn new(consumer_key: String, client_secret: String, redirect_url: Url) -> ConnectedApp {
-        ConnectedApp {
-            consumer_key,
-            client_secret,
-            redirect_url,
-        }
-    }
-}
-
-struct RefreshTokenAuth {
-    refresh_token: String,
-    access_token: Option<String>,
-    app: ConnectedApp,
-}
-
-impl RefreshTokenAuth {
-    pub async fn refresh_access_token(&mut self) -> Result<()> {
-        Ok(())
-    }
-}
-
-struct JwtAuth {
-    access_token: Option<String>,
-    app: ConnectedApp,
-    cert: String,
-}
-
-impl JwtAuth {
-    pub async fn refresh_access_token(&mut self) -> Result<()> {
-        Ok(())
-    }
-}
-
-enum AuthDetails {
-    AccessToken(String),
-    RefreshToken(RefreshTokenAuth),
-    Jwt(JwtAuth),
-}
-
-impl AuthDetails {
-    pub async fn refresh_access_token(&mut self) -> Result<()> {
-        match self {
-            AuthDetails::RefreshToken(tok) => tok.refresh_access_token(),
-            AuthDetails::Jwt(tok) => tok.refresh_access_token(),
-            AuthDetails::AccessToken(_) => Err(SalesforceError::CannotRefresh().into()),
-        }
-    }
-
-    pub fn get_access_token(&self) -> Option<String> {
-        match self {
-            AuthDetails::RefreshToken(tok) => tok.access_token,
-            AuthDetails::Jwt(tok) => tok.access_token,
-            AuthDetails::AccessToken(tok) => Some(tok),
-        }
-    }
-}
-
 pub struct ConnectionBody {
-    pub(crate) instance_url: String,
     pub(crate) api_version: String,
     sobject_types: RwLock<HashMap<String, SObjectType>>,
-    pub(crate) client: Client,
     auth: RwLock<AuthDetails>,
-    auth_refresh: RwLock<Option<JoinHandle<()>>>,
+    auth_refresh: Mutex<Option<Error>>,
+    auth_refresh_channel: RwLock<Option<broadcast::Sender<Option<AuthDetails>>>>,
 }
 
 pub struct Connection(Arc<ConnectionBody>);
@@ -134,66 +70,129 @@ impl Clone for Connection {
 }
 
 impl Connection {
-    pub fn new(sid: &str, instance_url: &str, api_version: &str) -> Result<Connection> {
-        let mut headers = header::HeaderMap::new();
-
-        headers.insert(
-            header::AUTHORIZATION,
-            header::HeaderValue::from_str(&format!("Bearer {}", sid))?,
-        );
-
+    pub fn new(auth: AuthDetails, api_version: &str) -> Result<Connection> {
         Ok(Connection {
             0: Arc::new(ConnectionBody {
                 api_version: api_version.to_string(),
-                instance_url: instance_url.to_string(),
                 sobject_types: RwLock::new(HashMap::new()),
-                client: Client::builder().default_headers(headers).build()?,
+                auth: RwLock::new(auth),
+                auth_refresh: Mutex::new(None),
+                auth_refresh_channel: RwLock::new(None),
             }),
         })
     }
 
-    pub fn get_base_url(&self) -> String {
-        format!("{}services/data/{}", self.instance_url, self.api_version)
+    pub async fn get_base_url(&self) -> String {
+        let lock = self.auth.read().await;
+        format!(
+            "{}services/data/{}",
+            lock.get_instance_url(),
+            self.api_version
+        )
     }
 
-    pub async fn get_access_token(&mut self) -> Result<String> {
-        // The sequence for auth token access goes like this:
-        // Attempt to get a lock on the auth structure.
-        // If this lock blocks, that means another thread is already
-        // attempting to refresh the token.
-        // If we obtain the lock and there is no token, attempt
-        // to start a token refresh, then recurse.
-        let access_token = self.auth.read().await;
+    pub async fn get_access_token(&self) -> Result<String> {
+        // Atomicity.
+        // When we request an access token, we should either:
 
-        let tok = access_token.get_access_token();
-        mem::drop(access_token);
+        // a. receive an access token that is currently believed to be valid.
+        // b. await until an in-process token refresh completes, and then
+        // receive the new token.
+
+        // Calls to `refresh_access_token()` should not be _automatically_
+        // accumulated if a refresh is already in progress, based on token-expired
+        // API responses. If the user explicitly calls `refresh_access_token()` more
+        // than once, that's okay.
+
+        // This means we need two locks, and they need to be acquired and released
+        // in a very specific order:
+        // When we start a refresh operation, we need to get _BOTH_ a write lock
+        // on the auth details structure (blocking reads),
+        // _AND_ a lock on the mutex. If we fail to get a lock on the mutex,
+        // that means someone else started a refresh while we weren't looking,
+        // and we should just await a read lock on the auth details.
+
+        // When we complete a refresh operation, we need to release the locks
+        // in the opposite order in which we obtained them, which prevents a
+        // race condition. First we drop the lock on the mutex, then on the
+        // auth details. This ensures that no one else will obtain the mutex
+        // lock while we are busy updating the auth and start another refresh -
+        // other clients will awake on the auth details first.
+
+        let tok = self.get_current_access_token().await;
 
         if let Some(tok) = tok {
             Ok(tok)
         } else {
             self.refresh_access_token().await?;
-            self.get_access_token().await
+            self.get_current_access_token()
+                .await
+                .ok_or(SalesforceError::CannotRefresh.into()) // Right error?
         }
     }
 
-    pub async fn refresh_access_token(&mut self) -> Result<()> {
-        // First, try to get a write lock on the auth struct.
-        // If we do not get the lock, get a read lock on the auth handle
-        // so that we can await until the update is complete.
-        // We don't want to do `write().await` because it would
-        // build up a queue of write lock contenders when this
-        // operation only needs to happen once.
+    async fn get_current_access_token(&self) -> Option<String> {
+        let access_token = self.auth.read().await;
 
-        // If we do get the lock, populate the auth handle with
-        // a Future.
-        let auth = self.auth.write().await;
-        let auth_handle = self.auth_refresh.write().await;
-
-        auth.refresh_access_token().await
+        access_token
+            .get_access_token()
+            .and_then(|s| Some(s.clone()))
     }
 
-    pub async fn get_type(&self, type_name: &str) -> Result<SObjectType> {
-        // TODO: can we be clever here to reduce lock contention?
+    pub async fn refresh_access_token(&self) -> Result<()> {
+        let auth_handle = self.auth_refresh.try_lock();
+
+        if let Ok(_) = auth_handle {
+            // We got the mutex lock, which means we should actually process the refresh.
+            let auth = self.auth.read().await;
+            let mut cloned_auth = auth.clone();
+
+            let (tx, _) = broadcast::channel(1);
+            let mut channel_lock = self.auth_refresh_channel.write().await;
+            *channel_lock = Some(tx.clone());
+
+            spawn(async move {
+                let result = cloned_auth.refresh_access_token().await;
+                if let Err(e) = result {
+                    tx.send(None);
+                } else {
+                    tx.send(Some(cloned_auth));
+                }
+                // Don't care about sending errors if there is no client waiting. TODO: this is wrong.
+                // TODO: what if we use a oneshot channel to THIS task,
+                // and use the locks to have other tasks await?
+            });
+        }
+
+        // Regardless of who got the lock, there should be a channel in `auth_refresh_channel`.
+        // Await on it.
+        let channel_lock = self.auth_refresh_channel.read().await;
+
+        if let Some(handle) = &*channel_lock {
+            let mut receiver = handle.subscribe();
+            // TODO: is there a race condition if the refresh task completes before we establish _any_ subscriber?
+            let outcome = receiver.recv().await;
+
+            if let Ok(r) = outcome {
+                if let Ok(_) = auth_handle {
+                    let mut auth = self.auth.write().await;
+                    *auth = r?;
+                }
+            }
+            // If receiving failed, just fall through - that means that the refresh
+            // completed before we subscribed, and the sender was dropped.
+        }
+        mem::drop(channel_lock);
+
+        if let Ok(_) = auth_handle {
+            let mut channel_lock = self.auth_refresh_channel.write().await;
+            *channel_lock = None;
+        }
+
+        Ok(())
+    }
+
+    pub async fn get_type(&mut self, type_name: &str) -> Result<SObjectType> {
         let mut sobject_types = self.sobject_types.write().await;
 
         if !sobject_types.contains_key(type_name) {
@@ -206,6 +205,7 @@ impl Connection {
                 SObjectType::new(type_name.to_string(), describe),
             );
         }
+        let sobject_types = sobject_types.downgrade();
 
         match sobject_types.get(type_name) {
             Some(rc) => Ok(rc.clone()), // TODO: Is this correct?
@@ -219,9 +219,20 @@ impl Connection {
     where
         K: SalesforceRequest<ReturnValue = T>,
     {
-        let url = format!("{}{}", self.get_base_url(), request.get_url());
+        let mut headers = header::HeaderMap::new();
+
+        headers.insert(
+            header::AUTHORIZATION,
+            header::HeaderValue::from_str(&format!("Bearer {}", self.get_access_token().await?))?,
+        );
+
+        let url = format!("{}{}", self.get_base_url().await, request.get_url());
         println!("I have URL {}", url);
-        let mut builder = self.client.request(request.get_method(), &url);
+        let mut builder = self
+            .client
+            .request(request.get_method(), &url)
+            .headers(headers);
+
         let method = request.get_method();
 
         if method == Method::POST || method == Method::PUT || method == Method::PATCH {

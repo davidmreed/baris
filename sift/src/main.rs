@@ -1,6 +1,7 @@
 use std::env;
 
 use anyhow::Result;
+use oxideforce::auth::{AuthDetails, ConnectedApp, UsernamePasswordAuth};
 use oxideforce::bulk::v2::{BulkQueryJob, BulkQueryOperation};
 use oxideforce::rest::query::QueryRequest;
 use oxideforce::rest::{
@@ -11,10 +12,23 @@ use tokio_stream::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let sid = env::var("SESSION_ID")?;
+    let username = env::var("USERNAME")?;
+    let password = env::var("PASSWORD")?;
+    let security_token = env::var("SECURITY_TOKEN")?;
     let instance_url = env::var("INSTANCE_URL")?;
+    let customer_key = env::var("CUSTOMER_KEY")?;
+    let client_secret = env::var("CLIENT_SECRET")?;
     let args: Vec<String> = env::args().collect();
-    let conn = Connection::new(&sid, &instance_url, "v52.0")?;
+    let conn = Connection::new(
+        AuthDetails::UsernameToken(UsernamePasswordAuth::new(
+            username,
+            password,
+            security_token,
+            ConnectedApp::new(customer_key, client_secret, None),
+            instance_url,
+        )),
+        "v52.0",
+    )?;
     let sobject_type = conn.get_type(&args[1]).await?;
 
     match args[2].as_str() {

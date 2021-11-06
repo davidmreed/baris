@@ -7,6 +7,7 @@ mod streams;
 pub use crate::errors::SalesforceError;
 pub mod api;
 pub use crate::api::Connection;
+pub mod auth;
 pub mod bulk;
 pub mod rest;
 
