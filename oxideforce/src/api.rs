@@ -168,6 +168,7 @@ impl Connection {
         // Await on it.
         let channel_lock = self.auth_refresh_channel.read().await;
 
+<<<<<<< HEAD
         if let Some(handle) = &*channel_lock {
             let mut receiver = handle.subscribe();
             // TODO: is there a race condition if the refresh task completes before we establish _any_ subscriber?
@@ -190,6 +191,26 @@ impl Connection {
         }
 
         Ok(())
+=======
+        // If we do get the lock, populate the auth handle with
+        // a Future.
+        let auth = self.auth.try_write(); // ... but what if someone has a read lock?
+
+        if let Some(handle) = auth {
+            // Enqueue and await on the OAuth refresh.
+            self.auth_handle = Some(spawn(async {
+                self.auth.refresh_access_token().await
+            }));
+
+            self.auth_handle.await?;
+            self.auth_handle = None;
+        } else {
+            // Someone else is running the refresh.
+            let lock = self.auth_handle.read().await;
+
+            self.auth_handle.await?;
+        }
+>>>>>>> 6578590b32dacdca2a8b4161ce937df0048122ba
     }
 
     pub async fn get_type(&mut self, type_name: &str) -> Result<SObjectType> {
