@@ -19,16 +19,17 @@ async fn main() -> Result<()> {
     let customer_key = env::var("CUSTOMER_KEY")?;
     let client_secret = env::var("CLIENT_SECRET")?;
     let args: Vec<String> = env::args().collect();
-    let conn = Connection::new(
-        AuthDetails::UsernameToken(UsernamePasswordAuth::new(
+    let mut conn = Connection::new(
+        AuthDetails::UsernamePassword(UsernamePasswordAuth::new(
             username,
             password,
-            security_token,
+            Some(security_token),
             ConnectedApp::new(customer_key, client_secret, None),
             instance_url,
         )),
         "v52.0",
     )?;
+    // TODO: should `conn` have to be mutable here?
     let sobject_type = conn.get_type(&args[1]).await?;
 
     match args[2].as_str() {

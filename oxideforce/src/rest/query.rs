@@ -106,7 +106,8 @@ impl BufferedLocatorManager for QueryStreamLocatorManager {
 
         spawn(async move {
             let result: QueryResult = conn
-                .client
+                .get_client()
+                .await?
                 .get(state.unwrap().locator.unwrap())
                 .send()
                 .await?

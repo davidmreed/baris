@@ -128,7 +128,8 @@ impl BufferedLocatorManager for BulkQueryLocatorManager {
             }
 
             let result = conn
-                .client
+                .get_client()
+                .await?
                 .get(&url)
                 .query(&query)
                 .send()
@@ -179,7 +180,8 @@ impl BulkQueryJob {
         let url = format!("{}/jobs/query", conn.get_base_url().await);
 
         let result = conn
-            .client
+            .get_client()
+            .await?
             .post(&url)
             .json(&json!({
                 "operation": operation,
@@ -199,7 +201,8 @@ impl BulkQueryJob {
 
     pub async fn check_status(&self, conn: &Connection) -> Result<BulkQueryJobDetail> {
         Ok(conn
-            .client
+            .get_client()
+            .await?
             .get(&format!(
                 "{}/jobs/query/{}",
                 conn.get_base_url().await,
