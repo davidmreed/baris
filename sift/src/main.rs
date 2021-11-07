@@ -12,19 +12,20 @@ use tokio_stream::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let username = env::var("USERNAME")?;
-    let password = env::var("PASSWORD")?;
+    let username = env::var("SALESFORCE_USER")?;
+    let password = env::var("SALESFORCE_PASSWORD")?;
     let security_token = env::var("SECURITY_TOKEN")?;
     let instance_url = env::var("INSTANCE_URL")?;
-    let customer_key = env::var("CUSTOMER_KEY")?;
+    let consumer_key = env::var("CONSUMER_KEY")?;
     let client_secret = env::var("CLIENT_SECRET")?;
+
     let args: Vec<String> = env::args().collect();
     let mut conn = Connection::new(
         AuthDetails::UsernamePassword(UsernamePasswordAuth::new(
             username,
             password,
             Some(security_token),
-            ConnectedApp::new(customer_key, client_secret, None),
+            ConnectedApp::new(consumer_key, client_secret, None),
             instance_url,
         )),
         "v52.0",

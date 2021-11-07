@@ -4,11 +4,10 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use anyhow::{Error, Result};
 use serde_derive::{Deserialize, Serialize};
 
 use super::errors::SalesforceError;
-
-use anyhow::{Error, Result};
 
 #[derive(Serialize, Deserialize, Copy, Clone)]
 #[serde(try_from = "String")]
@@ -495,7 +494,7 @@ pub struct FieldDescribe {
     pub controller_name: Option<String>,
     pub createable: bool,
     pub custom: bool,
-    pub default_value: Option<bool>,
+    pub default_value: Option<serde_json::Value>,
     pub default_value_formula: Option<String>,
     pub defaulted_on_create: bool,
     pub dependent_picklist: bool,

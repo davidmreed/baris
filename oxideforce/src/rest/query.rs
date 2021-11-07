@@ -41,9 +41,9 @@ impl SalesforceRequest for QueryRequest {
 
     fn get_url(&self) -> String {
         if self.all {
-            "/queryAll".to_string()
+            "queryAll".to_string()
         } else {
-            "/query".to_string()
+            "query".to_string()
         }
     }
 

@@ -14,7 +14,7 @@ use crate::auth::AuthDetails;
 use crate::rest::SObjectDescribeRequest;
 
 use anyhow::{Error, Result};
-use reqwest::{header, Client, Method};
+use reqwest::{header, Client, Method, Url};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
@@ -80,13 +80,17 @@ impl Connection {
         })
     }
 
-    pub async fn get_base_url(&self) -> String {
+    pub async fn get_base_url(&self) -> Result<Url> {
+        if self.get_current_access_token().await.is_none() {
+            // We haven't done an initial token refresh yet, so we may not have
+            // the right instance_url set.
+            self.refresh_access_token().await?;
+        }
+
         let lock = self.auth.read().await;
-        format!(
-            "{}services/data/{}",
-            lock.get_instance_url(),
-            self.api_version
-        )
+
+        Ok(Url::parse(lock.get_instance_url())?
+            .join(&format!("/services/data/{}/", self.api_version))?)
     }
 
     pub async fn get_access_token(&self) -> Result<String> {
@@ -188,9 +192,9 @@ impl Connection {
     where
         K: SalesforceRequest<ReturnValue = T>,
     {
-        let url = format!("{}{}", self.get_base_url().await, request.get_url());
+        let url = self.get_base_url().await?.join(&request.get_url())?;
         println!("I have URL {}", url);
-        let mut builder = self.get_client().await?.request(request.get_method(), &url);
+        let mut builder = self.get_client().await?.request(request.get_method(), url);
 
         let method = request.get_method();
 
@@ -206,8 +210,6 @@ impl Connection {
 
         let result = builder.send().await?.json().await?;
         // TODO: interpret common errors here, such as not found and access token expired.
-
-        println!("I received {:?}", result);
 
         Ok(request.get_result(&self, &result)?)
     }

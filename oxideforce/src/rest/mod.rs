@@ -31,7 +31,7 @@ impl SalesforceRequest for SObjectDescribeRequest {
     type ReturnValue = SObjectDescribe;
 
     fn get_url(&self) -> String {
-        format!("/sobjects/{}/describe", self.sobject)
+        format!("sobjects/{}/describe", self.sobject)
     }
 
     fn get_method(&self) -> Method {
@@ -87,7 +87,7 @@ impl SalesforceRequest for SObjectCreateRequest {
     }
 
     fn get_url(&self) -> String {
-        format!("/sobjects/{}/", self.sobject.sobjecttype.get_api_name())
+        format!("sobjects/{}/", self.sobject.sobjecttype.get_api_name())
     }
 
     fn get_method(&self) -> Method {
@@ -160,7 +160,7 @@ impl SalesforceRequest for SObjectUpdateRequest {
 
     fn get_url(&self) -> String {
         format!(
-            "/sobjects/{}/{}",
+            "sobjects/{}/{}",
             self.sobject.sobjecttype.get_api_name(),
             self.sobject.get_id().unwrap() // Cannot panic due to implementation of `new()`
         )
@@ -223,7 +223,7 @@ impl SalesforceRequest for SObjectUpsertRequest {
 
     fn get_url(&self) -> String {
         format!(
-            "/sobjects/{}/{}/{}",
+            "sobjects/{}/{}/{}",
             self.sobject.sobjecttype.get_api_name(),
             self.sobject
                 .get(&self.external_id)
@@ -265,7 +265,7 @@ impl SalesforceRequest for SObjectDeleteRequest {
 
     fn get_url(&self) -> String {
         format!(
-            "/sobjects/{}/{}",
+            "sobjects/{}/{}",
             self.sobject.sobjecttype.get_api_name(),
             self.sobject.get_id().unwrap()
         )
@@ -302,11 +302,7 @@ impl SalesforceRequest for SObjectRetrieveRequest {
     type ReturnValue = SObject;
 
     fn get_url(&self) -> String {
-        format!(
-            "/sobjects/{}/{}/",
-            self.sobject_type.get_api_name(),
-            self.id
-        )
+        format!("sobjects/{}/{}/", self.sobject_type.get_api_name(), self.id)
     }
 
     fn get_method(&self) -> Method {
