@@ -73,15 +73,29 @@ impl fmt::Display for SalesforceId {
     }
 }
 
+type DateTime = chrono::DateTime<chrono::Utc>;
+type Time = chrono::NaiveTime;
+type Date = chrono::NaiveDate;
+
+#[derive(Debug)]
+struct Address {
+    pub street: String,
+    pub city: String,
+    pub zip_postal_code: String,
+    pub state_province: String,
+    pub country: String,
+}
+
 #[derive(Debug)]
 pub enum FieldValue {
+    Address(Address),
     Integer(i64),
     Double(f64),
     Boolean(bool),
     String(String),
-    DateTime(String),
-    Time(String),
-    Date(String),
+    DateTime(DateTime),
+    Time(Time),
+    Date(Date),
     Id(SalesforceId),
     Null,
 }
