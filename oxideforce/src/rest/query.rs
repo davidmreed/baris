@@ -9,7 +9,7 @@ use tokio::{spawn, task::JoinHandle};
 use crate::{
     api::SalesforceRequest,
     streams::{BufferedLocatorManager, BufferedLocatorStream, BufferedLocatorStreamState},
-    Connection, SObject, SObjectType,
+    Connection, SObject, SObjectType, SalesforceError,
 };
 
 pub struct QueryRequest {
@@ -51,17 +51,21 @@ impl SalesforceRequest for QueryRequest {
         Method::GET
     }
 
-    fn get_result(&self, conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
-        Ok(BufferedLocatorStream::new(
-            Some(
-                serde_json::from_value::<QueryResult>(body.clone())?
-                    .to_locator_stream_state(&self.sobject_type)?,
-            ),
-            Box::new(QueryStreamLocatorManager {
-                conn: conn.clone(),
-                sobject_type: self.sobject_type.clone(),
-            }),
-        ))
+    fn get_result(&self, conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
+        if let Some(body) = body {
+            Ok(BufferedLocatorStream::new(
+                Some(
+                    serde_json::from_value::<QueryResult>(body.clone())?
+                        .to_locator_stream_state(&self.sobject_type)?,
+                ),
+                Box::new(QueryStreamLocatorManager {
+                    conn: conn.clone(),
+                    sobject_type: self.sobject_type.clone(),
+                }),
+            ))
+        } else {
+            Err(SalesforceError::ResponseBodyExpected.into())
+        }
     }
 }
 

@@ -2,7 +2,7 @@ use reqwest::Method;
 use serde_json::Value;
 
 use crate::api::CompositeFriendlyRequest;
-use crate::{api::SalesforceRequest, data::SObjectDescribe};
+use crate::{api::SalesforceRequest, rest::describe::SObjectDescribe};
 use crate::{Connection, SObject, SObjectType, SalesforceError, SalesforceId};
 
 use serde_derive::Deserialize;
@@ -11,46 +11,19 @@ use std::fmt;
 
 use anyhow::Result;
 
+pub mod collections;
 pub mod composite;
+pub mod describe;
 pub mod query;
-// SObject Describe Requests
-
-pub struct SObjectDescribeRequest {
-    sobject: String,
-}
-
-impl SObjectDescribeRequest {
-    pub fn new(sobject: &str) -> SObjectDescribeRequest {
-        SObjectDescribeRequest {
-            sobject: sobject.to_owned(),
-        }
-    }
-}
-
-impl SalesforceRequest for SObjectDescribeRequest {
-    type ReturnValue = SObjectDescribe;
-
-    fn get_url(&self) -> String {
-        format!("sobjects/{}/describe", self.sobject)
-    }
-
-    fn get_method(&self) -> Method {
-        Method::GET
-    }
-
-    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
-        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
-    }
-}
 
 // SObject Create Requests
 
 #[derive(Debug, Deserialize)]
 pub struct CreateResult {
-    pub id: Option<String>,
+    pub id: Option<SalesforceId>,
     pub errors: Option<Vec<String>>,
     pub success: bool,
-    pub created: Option<bool>,
+    pub created: Option<bool>, // TODO: is this really part of upsert only?
 }
 
 impl fmt::Display for CreateResult {
@@ -65,21 +38,21 @@ impl fmt::Display for CreateResult {
 
 impl Error for CreateResult {}
 
-pub struct SObjectCreateRequest {
-    sobject: SObject,
+pub struct SObjectCreateRequest<'a> {
+    sobject: &'a mut SObject,
 }
 
-impl SObjectCreateRequest {
-    pub fn new(sobject: SObject) -> Result<Self> {
+impl<'a> SObjectCreateRequest<'a> {
+    pub fn new(sobject: &'a mut SObject) -> Result<Self> {
         if sobject.get_id().is_some() {
-            return Err(SalesforceError::RecordExistsError().into());
+            return Err(SalesforceError::RecordExistsError.into());
         }
 
         Ok(Self { sobject })
     }
 }
 
-impl SalesforceRequest for SObjectCreateRequest {
+impl<'a> SalesforceRequest for SObjectCreateRequest<'a> {
     type ReturnValue = CreateResult;
 
     fn get_body(&self) -> Option<Value> {
@@ -87,7 +60,7 @@ impl SalesforceRequest for SObjectCreateRequest {
     }
 
     fn get_url(&self) -> String {
-        format!("sobjects/{}/", self.sobject.sobjecttype.get_api_name())
+        format!("sobjects/{}/", self.sobject.sobject_type.get_api_name())
     }
 
     fn get_method(&self) -> Method {
@@ -98,12 +71,16 @@ impl SalesforceRequest for SObjectCreateRequest {
         self.sobject.has_reference_parameters()
     }
 
-    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
-        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
+    fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
+        if let Some(body) = body {
+            Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
+        } else {
+            Err(SalesforceError::ResponseBodyExpected.into())
+        }
     }
 }
 
-impl CompositeFriendlyRequest for SObjectCreateRequest {}
+impl<'a> CompositeFriendlyRequest for SObjectCreateRequest<'a> {}
 
 // Result structures for DML operations
 
@@ -116,9 +93,21 @@ pub struct DmlError {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(untagged)]
 pub enum DmlResult {
     Success,
     Error(DmlError),
+}
+
+// TODO: can we implement `Try` instead?
+impl Into<Result<()>> for DmlResult {
+    fn into(self) -> Result<()> {
+        if let DmlResult::Error(e) = self {
+            Err(e.into())
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl fmt::Display for DmlError {
@@ -137,22 +126,22 @@ impl Error for DmlError {}
 
 // SObject Update Requests
 
-pub struct SObjectUpdateRequest {
-    sobject: SObject,
+pub struct SObjectUpdateRequest<'a> {
+    sobject: &'a mut SObject,
 }
 
-impl SObjectUpdateRequest {
-    pub fn new(sobject: SObject) -> Result<SObjectUpdateRequest> {
+impl<'a> SObjectUpdateRequest<'a> {
+    pub fn new(sobject: &'a mut SObject) -> Result<SObjectUpdateRequest> {
         if sobject.get_id().is_none() {
-            Err(SalesforceError::RecordDoesNotExistError().into())
+            Err(SalesforceError::RecordDoesNotExistError.into())
         } else {
             Ok(SObjectUpdateRequest { sobject })
         }
     }
 }
 
-impl SalesforceRequest for SObjectUpdateRequest {
-    type ReturnValue = DmlResult;
+impl<'a> SalesforceRequest for SObjectUpdateRequest<'a> {
+    type ReturnValue = ();
 
     fn get_body(&self) -> Option<Value> {
         Some(self.sobject.to_json())
@@ -161,7 +150,7 @@ impl SalesforceRequest for SObjectUpdateRequest {
     fn get_url(&self) -> String {
         format!(
             "sobjects/{}/{}",
-            self.sobject.sobjecttype.get_api_name(),
+            self.sobject.sobject_type.get_api_name(),
             self.sobject.get_id().unwrap() // Cannot panic due to implementation of `new()`
         )
     }
@@ -170,24 +159,29 @@ impl SalesforceRequest for SObjectUpdateRequest {
         Method::PATCH
     }
 
-    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
-        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
+    fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
+        // This request returns 204 No Content on success.
+        if let Some(body) = body {
+            Err(serde_json::from_value::<DmlError>(body.clone())?.into())
+        } else {
+            Ok(())
+        }
     }
 }
 
-impl CompositeFriendlyRequest for SObjectUpdateRequest {}
+impl<'a> CompositeFriendlyRequest for SObjectUpdateRequest<'a> {}
 
 // SObject Upsert Requests
 
-pub struct SObjectUpsertRequest {
-    sobject: SObject,
+pub struct SObjectUpsertRequest<'a> {
+    sobject: &'a mut SObject,
     external_id: String,
 }
 
-impl SObjectUpsertRequest {
-    pub fn new(sobject: SObject, external_id: &str) -> Result<SObjectUpsertRequest> {
+impl<'a> SObjectUpsertRequest<'a> {
+    pub fn new(sobject: &'a mut SObject, external_id: &str) -> Result<SObjectUpsertRequest<'a>> {
         if sobject
-            .sobjecttype
+            .sobject_type
             .get_describe()
             .get_field(external_id)
             .is_none()
@@ -214,7 +208,7 @@ impl SObjectUpsertRequest {
     }
 }
 
-impl SalesforceRequest for SObjectUpsertRequest {
+impl<'a> SalesforceRequest for SObjectUpsertRequest<'a> {
     type ReturnValue = DmlResult;
 
     fn get_body(&self) -> Option<Value> {
@@ -224,7 +218,7 @@ impl SalesforceRequest for SObjectUpsertRequest {
     fn get_url(&self) -> String {
         format!(
             "sobjects/{}/{}/{}",
-            self.sobject.sobjecttype.get_api_name(),
+            self.sobject.sobject_type.get_api_name(),
             self.sobject
                 .get(&self.external_id)
                 .unwrap() // will not panic via implementation of `new()`
@@ -237,36 +231,40 @@ impl SalesforceRequest for SObjectUpsertRequest {
         Method::PATCH
     }
 
-    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
-        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
-    }
-}
-
-impl CompositeFriendlyRequest for SObjectUpsertRequest {}
-
-// SObject Delete Requests
-
-pub struct SObjectDeleteRequest {
-    sobject: SObject,
-}
-
-impl SObjectDeleteRequest {
-    pub fn new(sobject: SObject) -> Result<SObjectDeleteRequest> {
-        if let Some(_) = sobject.get_id() {
-            Ok(SObjectDeleteRequest { sobject })
+    fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
+        if let Some(body) = body {
+            Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
         } else {
-            Err(SalesforceError::RecordDoesNotExistError().into())
+            Err(SalesforceError::ResponseBodyExpected.into())
         }
     }
 }
 
-impl SalesforceRequest for SObjectDeleteRequest {
-    type ReturnValue = DmlResult;
+impl<'a> CompositeFriendlyRequest for SObjectUpsertRequest<'a> {}
+
+// SObject Delete Requests
+
+pub struct SObjectDeleteRequest<'a> {
+    sobject: &'a mut SObject,
+}
+
+impl<'a> SObjectDeleteRequest<'a> {
+    pub fn new(sobject: &'a mut SObject) -> Result<SObjectDeleteRequest> {
+        if let Some(_) = sobject.get_id() {
+            Ok(SObjectDeleteRequest { sobject })
+        } else {
+            Err(SalesforceError::RecordDoesNotExistError.into())
+        }
+    }
+}
+
+impl<'a> SalesforceRequest for SObjectDeleteRequest<'a> {
+    type ReturnValue = ();
 
     fn get_url(&self) -> String {
         format!(
             "sobjects/{}/{}",
-            self.sobject.sobjecttype.get_api_name(),
+            self.sobject.sobject_type.get_api_name(),
             self.sobject.get_id().unwrap()
         )
     }
@@ -275,12 +273,17 @@ impl SalesforceRequest for SObjectDeleteRequest {
         Method::DELETE
     }
 
-    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
-        Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
+    fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
+        // This request returns a 204 + empty body on success.
+        if let Some(body) = body {
+            Err(serde_json::from_value::<DmlError>(body.clone())?.into())
+        } else {
+            Ok(())
+        }
     }
 }
 
-impl CompositeFriendlyRequest for SObjectDeleteRequest {}
+impl<'a> CompositeFriendlyRequest for SObjectDeleteRequest<'a> {}
 
 // SObject Retrieve Requests
 
@@ -309,8 +312,12 @@ impl SalesforceRequest for SObjectRetrieveRequest {
         Method::GET
     }
 
-    fn get_result(&self, _conn: &Connection, body: &Value) -> Result<Self::ReturnValue> {
-        Ok(SObject::from_json(body, &self.sobject_type)?)
+    fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
+        if let Some(body) = body {
+            Ok(SObject::from_json(body, &self.sobject_type)?)
+        } else {
+            Err(SalesforceError::ResponseBodyExpected.into())
+        }
     }
 }
 

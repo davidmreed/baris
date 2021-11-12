@@ -6,15 +6,27 @@ use std::sync::Arc;
 
 use anyhow::{Error, Result};
 use serde_derive::{Deserialize, Serialize};
+use serde_json::json;
+use tokio_stream::StreamExt;
+
+use crate::rest::describe::SObjectDescribe;
+use crate::rest::query::QueryRequest;
+use crate::rest::DmlResult;
+use crate::streams::BufferedLocatorStream;
+use crate::Connection;
 
 use super::errors::SalesforceError;
+use super::rest::{
+    SObjectCreateRequest, SObjectDeleteRequest, SObjectUpdateRequest, SObjectUpsertRequest,
+};
 
-#[derive(Serialize, Deserialize, Copy, Clone)]
+#[derive(Serialize, Deserialize, Copy, Clone, PartialEq)]
 #[serde(try_from = "String")]
 pub struct SalesforceId {
     id: [u8; 18],
 }
 
+// TODO: store as 15-char and render as 18 on string conversion.
 impl SalesforceId {
     pub fn new(id: &str) -> Result<SalesforceId, SalesforceError> {
         const ALNUMS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
@@ -73,7 +85,7 @@ impl fmt::Display for SalesforceId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum FieldValue {
     Integer(i64),
     Double(f64),
@@ -188,22 +200,106 @@ impl FieldValue {
     }
 }
 
+pub trait SObjectCollection {
+    fn create(&mut self, all_or_none: bool) -> Result<()>;
+    fn update(&self, all_or_none: bool) -> Result<()>;
+    fn upsert(&mut self, external_id: &str, all_or_none: bool) -> Result<()>;
+    fn delete(&mut self, all_or_none: bool) -> Result<()>;
+    fn retrieve(ids: Vec<SalesforceId>, fields: Vec<String>) -> Result<Vec<Option<SObject>>>;
+}
+
+impl SObjectCollection for Vec<SObject> {
+    fn create(&mut self, all_or_none: bool) -> Result<()> {
+        todo!()
+    }
+
+    fn update(&self, all_or_none: bool) -> Result<()> {
+        todo!()
+    }
+
+    fn upsert(&mut self, external_id: &str, all_or_none: bool) -> Result<()> {
+        todo!()
+    }
+
+    fn delete(&mut self, all_or_none: bool) -> Result<()> {
+        todo!()
+    }
+
+    fn retrieve(ids: Vec<SalesforceId>, fields: Vec<String>) -> Result<Vec<Option<SObject>>> {
+        todo!()
+    }
+}
+
 pub struct SObject {
-    pub sobjecttype: SObjectType,
+    pub sobject_type: SObjectType,
     pub fields: HashMap<String, FieldValue>,
 }
 
 impl SObject {
-    pub fn new(sobjecttype: &SObjectType) -> SObject {
+    pub fn new(sobject_type: &SObjectType) -> SObject {
         SObject {
-            sobjecttype: sobjecttype.clone(),
+            sobject_type: sobject_type.clone(),
             fields: HashMap::new(),
         }
     }
 
+    pub async fn query(
+        conn: &Connection,
+        sobject_type: &SObjectType,
+        query: &str,
+        all: bool,
+    ) -> Result<BufferedLocatorStream> {
+        let request = QueryRequest::new(sobject_type, query, all);
+
+        Ok(conn.execute(&request).await?)
+    }
+
+    pub async fn query_vec(
+        conn: &Connection,
+        sobject_type: &SObjectType,
+        query: &str,
+        all: bool,
+    ) -> Result<Vec<SObject>> {
+        let stream = Self::query(conn, sobject_type, query, all).await?;
+
+        Ok(stream.collect::<Result<Vec<SObject>>>().await?)
+    }
+
+    pub async fn create(&mut self, conn: &Connection) -> Result<()> {
+        let request = SObjectCreateRequest::new(self)?;
+        let result = conn.execute(&request).await?;
+
+        if result.success {
+            self.set_id(result.id.unwrap())?;
+            Ok(())
+        } else {
+            Err(result.into())
+        }
+    }
+
+    pub async fn update(&mut self, conn: &Connection) -> Result<()> {
+        conn.execute(&SObjectUpdateRequest::new(self)?).await
+    }
+
+    pub async fn upsert(&mut self, conn: &Connection, external_id: &str) -> Result<()> {
+        conn.execute(&SObjectUpsertRequest::new(self, external_id)?)
+            .await?
+            .into()
+    }
+
+    pub async fn delete(&mut self, conn: &Connection) -> Result<()> {
+        let result = conn.execute(&SObjectDeleteRequest::new(self)?).await;
+
+        if let Ok(_) = &result {
+            self.put("id", FieldValue::Null)?;
+        }
+
+        result
+    }
+
     pub fn put(&mut self, key: &str, val: FieldValue) -> Result<()> {
         // Locate the describe for this field.
-        let describe = self.sobjecttype.get_describe().get_field(key);
+        let describe = self.sobject_type.get_describe().get_field(key);
 
         if describe.is_none() {
             return Err(SalesforceError::SchemaError(format!(
@@ -222,7 +318,7 @@ impl SObject {
             Err(SalesforceError::SchemaError(format!(
                 "Wrong type of value ({:?}) for field {}.{} (type {:?})",
                 val.get_soap_type(),
-                self.sobjecttype.get_api_name(),
+                self.sobject_type.get_api_name(),
                 key,
                 describe.soap_type
             ))
@@ -241,11 +337,15 @@ impl SObject {
         }
     }
 
+    pub fn set_id(&mut self, id: SalesforceId) -> Result<()> {
+        self.put("id", FieldValue::Id(id))
+    }
+
     pub fn get(&self, key: &str) -> Option<&FieldValue> {
         self.fields.get(&key.to_lowercase())
     }
 
-    pub fn get_binary_blob(&self, key: &str) {
+    pub fn get_binary_blob(&self, _key: &str) {
         unimplemented!();
     }
 
@@ -265,7 +365,7 @@ impl SObject {
                 let describe = sobjecttype.get_describe().get_field(k).unwrap();
 
                 ret.put(
-                    k,
+                    &k.to_lowercase(),
                     FieldValue::from_str(rec.get(k).unwrap(), &describe.soap_type)?,
                 )?;
             }
@@ -283,7 +383,7 @@ impl SObject {
                     let describe = sobjecttype.get_describe().get_field(k).unwrap();
 
                     ret.put(
-                        k,
+                        &k.to_lowercase(),
                         FieldValue::from_json(value.get(k).unwrap(), describe.soap_type)?,
                     )?;
                 }
@@ -302,6 +402,21 @@ impl SObject {
         for (k, v) in self.fields.iter() {
             map.insert(k.to_string(), v.into());
         }
+
+        serde_json::Value::Object(map)
+    }
+
+    pub(crate) fn to_json_with_type(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+
+        for (k, v) in self.fields.iter() {
+            map.insert(k.to_string(), v.into());
+        }
+
+        map.insert(
+            "attributes".to_string(),
+            json!({"type": self.sobject_type.get_api_name() }),
+        );
 
         serde_json::Value::Object(map)
     }
@@ -443,16 +558,6 @@ impl fmt::Display for SObjectType {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PicklistValueDescribe {
-    active: bool,
-    default_value: bool,
-    label: String,
-    valid_for: Option<String>, // fixme: probably a new type
-    value: String,
-}
-
 #[derive(Debug, Deserialize, PartialEq, Copy, Clone)]
 pub enum SoapType {
     #[serde(rename = "urn:address")]
@@ -477,163 +582,6 @@ pub enum SoapType {
     String,
     #[serde(rename = "xsd:time")]
     Time,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FieldDescribe {
-    pub aggregatable: bool,
-    pub ai_prediction_field: bool,
-    pub auto_number: bool,
-    pub byte_length: u32,
-    pub calculated: bool,
-    pub calculated_formula: Option<String>,
-    pub cascade_delete: bool,
-    pub case_sensitive: bool,
-    pub compound_field_name: Option<String>,
-    pub controller_name: Option<String>,
-    pub createable: bool,
-    pub custom: bool,
-    pub default_value: Option<serde_json::Value>,
-    pub default_value_formula: Option<String>,
-    pub defaulted_on_create: bool,
-    pub dependent_picklist: bool,
-    pub deprecated_and_hidden: bool,
-    pub digits: u16,
-    pub display_location_in_decimal: bool,
-    pub encrypted: bool,
-    pub external_id: bool,
-    //pub extraTypeInfo: null
-    pub filterable: bool,
-    //filteredLookupInfo: null
-    pub formula_treat_null_number_as_zero: bool,
-    pub groupable: bool,
-    pub high_scale_number: bool,
-    pub html_formatted: bool,
-    pub id_lookup: bool,
-    pub inline_help_text: Option<String>,
-    pub label: String,
-    pub length: u32,
-    //pub mask: null
-    //pub maskType: null
-    pub name: String,
-    pub name_field: bool,
-    pub name_pointing: bool,
-    pub nillable: bool,
-    pub permissionable: bool,
-    pub picklist_values: Vec<PicklistValueDescribe>,
-    pub polymorphic_foreign_key: bool,
-    pub precision: u16,
-    pub query_by_distance: bool,
-    pub reference_target_field: Option<String>,
-    pub reference_to: Vec<String>,
-    pub relationship_name: Option<String>,
-    pub relationship_order: Option<u16>,
-    pub restricted_delete: bool,
-    pub restricted_picklist: bool,
-    pub scale: u16,
-    pub search_prefilterable: bool,
-    pub soap_type: SoapType,
-    pub sortable: bool,
-    #[serde(rename = "type")]
-    pub field_type: String,
-    pub unique: bool,
-    pub updateable: bool,
-    pub write_requires_master_read: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChildRelationshipDescribe {
-    pub cascade_delete: bool,
-    #[serde(rename = "childSObject")]
-    pub child_sobject: String,
-    pub deprecated_and_hidden: bool,
-    pub field: String,
-    pub junction_id_list_names: Option<Vec<String>>,
-    pub junction_reference_to: Option<Vec<String>>,
-    pub relationship_name: String,
-    pub restricted_delete: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecordTypeDescribe {
-    pub active: bool,
-    pub available: bool,
-    pub default_record_type_mapping: bool,
-    pub developer_name: String,
-    pub master: bool,
-    pub name: String,
-    pub record_type_id: SalesforceId,
-    pub urls: HashMap<String, String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ScopeDescribe {
-    pub label: String,
-    pub name: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SObjectDescribe {
-    //action_overrides: Vec<ActionOverrideDescribe>,
-    pub activateable: bool,
-    pub compact_layoutable: bool,
-    pub createable: bool,
-    pub custom: bool,
-    pub custom_setting: bool,
-    pub deep_cloneable: bool,
-    //defaultImplementation: null // FIXME
-    pub deletable: bool,
-    //pub deprecated_and_hidden: bool,
-    //extendedBy: null
-    //extendsInterfaces: null
-    pub feed_enabled: bool,
-    fields: Vec<FieldDescribe>,
-    pub has_subtypes: bool,
-    //implementedBy: Option<String>,
-    //implementsInterfaces: Option<String>,
-    pub is_interface: bool,
-    pub is_subtype: bool,
-    pub key_prefix: String,
-    pub label: String,
-    pub label_plural: String,
-    pub layoutable: bool,
-    pub listviewable: Option<bool>,
-    pub lookup_layoutable: Option<bool>,
-    pub mergeable: bool,
-    pub mru_enabled: bool,
-    pub name: String,
-    pub named_layout_infos: Vec<HashMap<String, String>>,
-    pub network_scope_field_name: Option<String>,
-    pub queryable: bool,
-    pub record_type_infos: Vec<RecordTypeDescribe>,
-    pub replicateable: bool,
-    pub retrieveable: bool,
-    pub search_layoutable: bool,
-    pub searchable: bool,
-    pub supported_scopes: Vec<ScopeDescribe>,
-    pub triggerable: bool,
-    pub undeletable: bool,
-    pub updateable: bool,
-    pub urls: HashMap<String, String>,
-}
-
-impl SObjectDescribe {
-    pub fn get_field(&self, api_name: &str) -> Option<&FieldDescribe> {
-        // TODO: cache a case-insensitive HashMap for fields.
-        let target = api_name.to_lowercase();
-
-        for f in self.fields.iter() {
-            if f.name.to_lowercase() == target {
-                return Some(f);
-            }
-        }
-
-        None
-    }
 }
 
 #[cfg(test)]

@@ -11,5 +11,8 @@ pub mod auth;
 pub mod bulk;
 pub mod rest;
 
+#[cfg(test)]
+mod test_integration;
+
 extern crate chrono;
 extern crate csv;
