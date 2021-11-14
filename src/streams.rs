@@ -89,6 +89,7 @@ impl Stream for BufferedLocatorStream {
                 return Poll::Ready(Some(Ok(sobject)));
             } else if let Some(task) = &mut self.retrieve_task {
                 // We have a task waiting already.
+                // TODO: can we replace this task with a channel?
                 let fut = unsafe { Pin::new_unchecked(task) };
                 let poll = fut.poll(cx);
                 if let Poll::Ready(result) = poll {

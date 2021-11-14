@@ -7,14 +7,14 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use super::data::{SObjectDescribe, SObjectType};
+use super::data::SObjectType;
 use super::errors::SalesforceError;
 
 use crate::auth::AuthDetails;
-use crate::rest::SObjectDescribeRequest;
+use crate::rest::describe::{SObjectDescribe, SObjectDescribeRequest};
 
 use anyhow::{Error, Result};
-use reqwest::{header, Client, Method, Url};
+use reqwest::{header, Client, Method, StatusCode, Url};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
@@ -36,7 +36,7 @@ pub trait SalesforceRequest {
         false
     }
 
-    fn get_result(&self, conn: &Connection, body: &Value) -> Result<Self::ReturnValue>;
+    fn get_result(&self, conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue>;
 }
 
 pub trait CompositeFriendlyRequest: SalesforceRequest {}
@@ -208,9 +208,13 @@ impl Connection {
             builder = builder.query(&params);
         }
 
-        let result = builder.send().await?.json().await?;
         // TODO: interpret common errors here, such as not found and access token expired.
+        let result = builder.send().await?.error_for_status()?;
 
-        Ok(request.get_result(&self, &result)?)
+        if result.status() == StatusCode::NO_CONTENT {
+            Ok(request.get_result(&self, None)?)
+        } else {
+            Ok(request.get_result(&self, Some(&result.json().await?))?)
+        }
     }
 }

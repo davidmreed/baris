@@ -152,6 +152,15 @@ pub struct AccessTokenAuth {
     instance_url: String,
 }
 
+impl AccessTokenAuth {
+    pub fn new(access_token: String, instance_url: String) -> AccessTokenAuth {
+        AccessTokenAuth {
+            access_token,
+            instance_url,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum AuthDetails {
     AccessToken(AccessTokenAuth),
