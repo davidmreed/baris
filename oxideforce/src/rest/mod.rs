@@ -144,7 +144,7 @@ impl<'a> SalesforceRequest for SObjectUpdateRequest<'a> {
     type ReturnValue = ();
 
     fn get_body(&self) -> Option<Value> {
-        Some(self.sobject.to_json())
+        Some(self.sobject.to_json_without_id()) // FIXME: including the Id is probably what's causing the 400 here.
     }
 
     fn get_url(&self) -> String {
@@ -301,6 +301,7 @@ impl SObjectRetrieveRequest {
     }
 }
 
+// TODO: support optional Fields query parameter
 impl SalesforceRequest for SObjectRetrieveRequest {
     type ReturnValue = SObject;
 

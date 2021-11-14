@@ -11,13 +11,13 @@ use tokio_stream::StreamExt;
 
 use crate::rest::describe::SObjectDescribe;
 use crate::rest::query::QueryRequest;
-use crate::rest::DmlResult;
 use crate::streams::BufferedLocatorStream;
 use crate::Connection;
 
 use super::errors::SalesforceError;
 use super::rest::{
-    SObjectCreateRequest, SObjectDeleteRequest, SObjectUpdateRequest, SObjectUpsertRequest,
+    SObjectCreateRequest, SObjectDeleteRequest, SObjectRetrieveRequest, SObjectUpdateRequest,
+    SObjectUpsertRequest,
 };
 
 #[derive(Serialize, Deserialize, Copy, Clone, PartialEq)]
@@ -260,9 +260,10 @@ impl SObject {
         query: &str,
         all: bool,
     ) -> Result<Vec<SObject>> {
-        let stream = Self::query(conn, sobject_type, query, all).await?;
-
-        Ok(stream.collect::<Result<Vec<SObject>>>().await?)
+        Ok(Self::query(conn, sobject_type, query, all)
+            .await?
+            .collect::<Result<Vec<SObject>>>()
+            .await?)
     }
 
     pub async fn create(&mut self, conn: &Connection) -> Result<()> {
@@ -295,6 +296,15 @@ impl SObject {
         }
 
         result
+    }
+
+    pub async fn retrieve(
+        conn: &Connection,
+        sobject_type: &SObjectType,
+        id: SalesforceId,
+    ) -> Result<SObject> {
+        conn.execute(&SObjectRetrieveRequest::new(id, sobject_type))
+            .await
     }
 
     pub fn put(&mut self, key: &str, val: FieldValue) -> Result<()> {
@@ -406,6 +416,19 @@ impl SObject {
         serde_json::Value::Object(map)
     }
 
+    // TODO: clean up these three methods
+    pub(crate) fn to_json_without_id(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+
+        for (k, v) in self.fields.iter() {
+            if k != "id" {
+                map.insert(k.to_string(), v.into());
+            }
+        }
+
+        serde_json::Value::Object(map)
+    }
+
     pub(crate) fn to_json_with_type(&self) -> serde_json::Value {
         let mut map = serde_json::Map::new();
 
@@ -464,6 +487,9 @@ impl FieldValue {
     }
 
     fn from_json(value: &serde_json::Value, soap_type: SoapType) -> Result<FieldValue> {
+        if let serde_json::Value::Null = value {
+            return Ok(FieldValue::Null);
+        }
         match soap_type {
             SoapType::Address | SoapType::Any | SoapType::Blob => panic!("Not supported"),
             SoapType::Boolean => {

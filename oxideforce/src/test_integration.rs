@@ -6,17 +6,19 @@ use crate::{
     Connection, FieldValue, SObject,
 };
 
-#[tokio::test]
-async fn test_individual_sobjects() -> Result<()> {
+fn get_test_connection() -> Result<Connection> {
     let access_token = env::var("SESSION_ID")?;
     let instance_url = env::var("INSTANCE_URL")?;
 
-    let mut conn = Connection::new(
+    Connection::new(
         AuthDetails::AccessToken(AccessTokenAuth::new(access_token, instance_url)),
         "v52.0",
-    )?;
+    )
+}
 
-    // Basic sObject manipulation.
+#[tokio::test]
+async fn test_individual_sobjects() -> Result<()> {
+    let mut conn = get_test_connection()?;
     let account_type = conn.get_type("Account").await?;
 
     let before_count = SObject::query_vec(
@@ -43,6 +45,14 @@ async fn test_individual_sobjects() -> Result<()> {
 
     assert!(accounts.len() == before_count + 1);
     assert!(accounts[0].get("Name").unwrap() == &FieldValue::String("Test".to_owned()));
+
+    account.put("Name", FieldValue::String("Test 2".to_owned()))?;
+    account.update(&conn).await?;
+
+    let updated_account =
+        SObject::retrieve(&conn, &account_type, account.get_id().unwrap().to_owned()).await?;
+    assert!(updated_account.get("Name").unwrap() == &FieldValue::String("Test 2".to_owned()));
+
     accounts[0].delete(&conn).await?;
 
     Ok(())
