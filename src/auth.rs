@@ -1,10 +1,18 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use reqwest::{Client, Url};
 use serde_derive::Deserialize;
 
 use crate::SalesforceError;
 
-#[derive(Clone)]
+#[async_trait]
+pub trait Authentication: Send + Sync {
+    async fn refresh_access_token(&mut self) -> Result<()>;
+    async fn get_instance_url(&self) -> Result<&Url>;
+    fn get_access_token(&self) -> Option<&String>;
+}
+
+#[derive(Debug, Clone)]
 pub struct ConnectedApp {
     consumer_key: String,
     client_secret: String,
@@ -25,14 +33,6 @@ impl ConnectedApp {
     }
 }
 
-#[derive(Clone)]
-pub struct RefreshTokenAuth {
-    refresh_token: String,
-    instance_url: String,
-    access_token: Option<String>,
-    app: ConnectedApp,
-}
-
 #[derive(Deserialize)]
 struct TokenResponse {
     id: String,
@@ -44,8 +44,17 @@ struct TokenResponse {
     scope: Option<String>,
 }
 
-impl RefreshTokenAuth {
-    pub async fn refresh_access_token(&mut self) -> Result<()> {
+#[derive(Clone)]
+pub struct RefreshTokenAuth {
+    refresh_token: String,
+    instance_url: Url,
+    access_token: Option<String>,
+    app: ConnectedApp,
+}
+
+#[async_trait]
+impl Authentication for RefreshTokenAuth {
+    async fn refresh_access_token(&mut self) -> Result<()> {
         self.access_token = None;
 
         let url = format!("{}/services/oauth2/token", self.instance_url);
@@ -65,23 +74,40 @@ impl RefreshTokenAuth {
             .await?;
 
         self.access_token = Some(result.access_token);
-        self.instance_url = result.instance_url;
+        self.instance_url = Url::parse(&result.instance_url)?;
 
         Ok(())
+    }
+
+    async fn get_instance_url(&self) -> Result<&Url> {
+        Ok(&self.instance_url)
+    }
+
+    fn get_access_token(&self) -> Option<&String> {
+        self.access_token.as_ref()
     }
 }
 
 #[derive(Clone)]
 pub struct JwtAuth {
     access_token: Option<String>,
-    instance_url: String,
+    instance_url: Url,
     app: ConnectedApp,
     cert: String,
 }
 
-impl JwtAuth {
-    pub async fn refresh_access_token(&mut self) -> Result<()> {
-        Ok(())
+#[async_trait]
+impl Authentication for JwtAuth {
+    async fn refresh_access_token(&mut self) -> Result<()> {
+        todo!();
+    }
+
+    async fn get_instance_url(&self) -> Result<&Url> {
+        Ok(&self.instance_url)
+    }
+
+    fn get_access_token(&self) -> Option<&String> {
+        self.access_token.as_ref()
     }
 }
 
@@ -92,7 +118,7 @@ pub struct UsernamePasswordAuth {
     security_token: Option<String>,
     app: ConnectedApp,
     access_token: Option<String>,
-    instance_url: String,
+    instance_url: Url,
 }
 
 impl UsernamePasswordAuth {
@@ -101,7 +127,7 @@ impl UsernamePasswordAuth {
         password: String,
         security_token: Option<String>,
         app: ConnectedApp,
-        instance_url: String,
+        instance_url: Url,
     ) -> UsernamePasswordAuth {
         UsernamePasswordAuth {
             username,
@@ -112,10 +138,14 @@ impl UsernamePasswordAuth {
             access_token: None,
         }
     }
-    pub async fn refresh_access_token(&mut self) -> Result<()> {
+}
+
+#[async_trait]
+impl Authentication for UsernamePasswordAuth {
+    async fn refresh_access_token(&mut self) -> Result<()> {
         self.access_token = None;
 
-        let url = format!("{}/services/oauth2/token", self.instance_url);
+        let url = self.instance_url.join("services/oauth2/token")?;
         let empty = "".to_string();
         let security_token = if let Some(security_token) = &self.security_token {
             security_token
@@ -140,20 +170,33 @@ impl UsernamePasswordAuth {
             .await?;
 
         self.access_token = Some(result.access_token);
-        self.instance_url = result.instance_url;
+        self.instance_url = Url::parse(&result.instance_url)?;
 
         Ok(())
+    }
+
+    async fn get_instance_url(&self) -> Result<&Url> {
+        // We may not yet be authenticated.
+        if self.access_token.is_none() {
+            return Err(SalesforceError::NotAuthenticated.into());
+        }
+
+        Ok(&self.instance_url)
+    }
+
+    fn get_access_token(&self) -> Option<&String> {
+        self.access_token.as_ref()
     }
 }
 
 #[derive(Clone)]
 pub struct AccessTokenAuth {
     access_token: String,
-    instance_url: String,
+    instance_url: Url,
 }
 
 impl AccessTokenAuth {
-    pub fn new(access_token: String, instance_url: String) -> AccessTokenAuth {
+    pub fn new(access_token: String, instance_url: Url) -> AccessTokenAuth {
         AccessTokenAuth {
             access_token,
             instance_url,
@@ -161,39 +204,16 @@ impl AccessTokenAuth {
     }
 }
 
-#[derive(Clone)]
-pub enum AuthDetails {
-    AccessToken(AccessTokenAuth),
-    RefreshToken(RefreshTokenAuth),
-    Jwt(JwtAuth),
-    UsernamePassword(UsernamePasswordAuth),
-}
-
-impl AuthDetails {
-    pub async fn refresh_access_token(&mut self) -> Result<()> {
-        match self {
-            AuthDetails::RefreshToken(tok) => Ok(tok.refresh_access_token().await?),
-            AuthDetails::Jwt(tok) => Ok(tok.refresh_access_token().await?),
-            AuthDetails::UsernamePassword(tok) => Ok(tok.refresh_access_token().await?),
-            AuthDetails::AccessToken(_) => Err(SalesforceError::CannotRefresh.into()),
-        }
+#[async_trait]
+impl Authentication for AccessTokenAuth {
+    async fn refresh_access_token(&mut self) -> Result<()> {
+        Err(SalesforceError::CannotRefresh.into())
+    }
+    async fn get_instance_url(&self) -> Result<&Url> {
+        Ok(&self.instance_url)
     }
 
-    pub fn get_instance_url(&self) -> &str {
-        match self {
-            AuthDetails::RefreshToken(tok) => &tok.instance_url,
-            AuthDetails::Jwt(tok) => &tok.instance_url,
-            AuthDetails::UsernamePassword(tok) => &tok.instance_url,
-            AuthDetails::AccessToken(tok) => &tok.instance_url,
-        }
-    }
-
-    pub fn get_access_token(&self) -> Option<&String> {
-        match self {
-            AuthDetails::RefreshToken(tok) => tok.access_token.as_ref(),
-            AuthDetails::Jwt(tok) => tok.access_token.as_ref(),
-            AuthDetails::UsernamePassword(tok) => tok.access_token.as_ref(),
-            AuthDetails::AccessToken(tok) => Some(&tok.access_token),
-        }
+    fn get_access_token(&self) -> Option<&String> {
+        Some(&self.access_token)
     }
 }

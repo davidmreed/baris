@@ -1,12 +1,11 @@
 use anyhow::Result;
 use futures::future::join_all;
 use itertools::Itertools;
+use reqwest::Url;
 use std::env;
 
 use crate::{
-    auth::{AccessTokenAuth, AuthDetails},
-    rest::collections::SObjectCollection,
-    Connection, FieldValue, SObject,
+    auth::AccessTokenAuth, rest::collections::SObjectCollection, Connection, FieldValue, SObject,
 };
 
 fn get_test_connection() -> Result<Connection> {
@@ -14,7 +13,10 @@ fn get_test_connection() -> Result<Connection> {
     let instance_url = env::var("INSTANCE_URL")?;
 
     Connection::new(
-        AuthDetails::AccessToken(AccessTokenAuth::new(access_token, instance_url)),
+        Box::new(AccessTokenAuth::new(
+            access_token,
+            Url::parse(&instance_url)?,
+        )),
         "v52.0",
     )
 }
