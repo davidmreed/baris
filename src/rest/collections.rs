@@ -4,10 +4,73 @@ use crate::{
 };
 
 use anyhow::Result;
+use async_trait::async_trait;
 use reqwest::Method;
 use serde_json::{json, Value};
 
 use super::DmlResultWithId;
+
+// Traits
+
+#[async_trait]
+pub trait SObjectCollection {
+    async fn create(&mut self, conn: Connection, all_or_none: bool) -> Result<Vec<Result<()>>>;
+    async fn update(&mut self, conn: &Connection, all_or_none: bool) -> Result<Vec<Result<()>>>;
+    async fn upsert(
+        &mut self,
+        conn: &Connection,
+        external_id: &str,
+        all_or_none: bool,
+    ) -> Result<Vec<Result<()>>>;
+    async fn delete(&mut self, conn: &Connection, all_or_none: bool) -> Result<Vec<Result<()>>>;
+}
+
+#[async_trait]
+impl SObjectCollection for Vec<SObject> {
+    async fn create(&mut self, conn: Connection, all_or_none: bool) -> Result<Vec<Result<()>>> {
+        let request = SObjectCollectionCreateRequest::new(self, all_or_none)?;
+
+        Ok(conn
+            .execute(&request)
+            .await?
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                if r.success {
+                    self.get_mut(i).unwrap().set_id(r.id.unwrap());
+                }
+
+                r.into()
+            })
+            .collect())
+    }
+
+    async fn update(&mut self, conn: &Connection, all_or_none: bool) -> Result<Vec<Result<()>>> {
+        let request = SObjectCollectionUpdateRequest::new(self, all_or_none)?;
+
+        Ok(conn
+            .execute(&request)
+            .await?
+            .into_iter()
+            .map(|r| r.into())
+            .collect())
+    }
+
+    async fn upsert(
+        &mut self,
+        conn: &Connection,
+        external_id: &str,
+        all_or_none: bool,
+    ) -> Result<Vec<Result<()>>> {
+        todo!()
+    }
+
+    async fn delete(&mut self, conn: &Connection, all_or_none: bool) -> Result<Vec<Result<()>>> {
+        todo!()
+    }
+}
+
+// Requests
 
 pub struct SObjectCollectionCreateRequest<'a> {
     objects: &'a mut Vec<SObject>,

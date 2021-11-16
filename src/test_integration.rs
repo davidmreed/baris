@@ -5,7 +5,7 @@ use std::env;
 
 use crate::{
     auth::{AccessTokenAuth, AuthDetails},
-    data::SObjectCollection,
+    rest::collections::SObjectCollection,
     Connection, FieldValue, SObject,
 };
 

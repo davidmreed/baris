@@ -5,12 +5,38 @@ use reqwest::Method;
 use serde_derive::Deserialize;
 use serde_json::{Map, Value};
 use tokio::{spawn, task::JoinHandle};
+use tokio_stream::StreamExt;
 
 use crate::{
     api::SalesforceRequest,
     streams::{BufferedLocatorManager, BufferedLocatorStream, BufferedLocatorStreamState},
     Connection, SObject, SObjectType, SalesforceError,
 };
+
+impl SObject {
+    pub async fn query(
+        conn: &Connection,
+        sobject_type: &SObjectType,
+        query: &str,
+        all: bool,
+    ) -> Result<BufferedLocatorStream> {
+        let request = QueryRequest::new(sobject_type, query, all);
+
+        Ok(conn.execute(&request).await?)
+    }
+
+    pub async fn query_vec(
+        conn: &Connection,
+        sobject_type: &SObjectType,
+        query: &str,
+        all: bool,
+    ) -> Result<Vec<SObject>> {
+        Ok(Self::query(conn, sobject_type, query, all)
+            .await?
+            .collect::<Result<Vec<SObject>>>()
+            .await?)
+    }
+}
 
 pub struct QueryRequest {
     query: String,

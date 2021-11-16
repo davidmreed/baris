@@ -8,22 +8,11 @@ use anyhow::{Error, Result};
 use chrono::{FixedOffset, Utc};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::json;
-use tokio_stream::StreamExt;
 
-use crate::rest::collections::SObjectCollectionUpdateRequest;
 use crate::rest::describe::SObjectDescribe;
-use crate::rest::query::QueryRequest;
-use crate::streams::BufferedLocatorStream;
 use crate::Connection;
 
 use super::errors::SalesforceError;
-use super::rest::collections::SObjectCollectionCreateRequest;
-use super::rest::{
-    SObjectCreateRequest, SObjectDeleteRequest, SObjectRetrieveRequest, SObjectUpdateRequest,
-    SObjectUpsertRequest,
-};
-
-use async_trait::async_trait;
 
 // The Salesforce API's required datetime format is mostly RFC 3339,
 // but requires _exactly_ three fractional second digits (millisecond resultion).
@@ -85,7 +74,7 @@ impl TryFrom<&str> for SalesforceId {
     type Error = SalesforceError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        SalesforceId::new(&value)
+        SalesforceId::new(value)
     }
 }
 
@@ -133,11 +122,13 @@ pub enum FieldValue {
     Date(Date),
     Id(SalesforceId),
     Relationship(SObject),
-    Blob(String),
+    Blob(String), // TODO: implement Blobs
     Null,
+    // TODO: implement reference parameters
 }
 
 impl FieldValue {
+    // TODO: ensure these are complete.
     pub fn is_int(&self) -> bool {
         if let FieldValue::Integer(_) = &self {
             true
@@ -226,64 +217,6 @@ impl FieldValue {
     }
 }
 
-#[async_trait]
-pub trait SObjectCollection {
-    async fn create(&mut self, conn: Connection, all_or_none: bool) -> Result<Vec<Result<()>>>;
-    async fn update(&mut self, conn: &Connection, all_or_none: bool) -> Result<Vec<Result<()>>>;
-    async fn upsert(
-        &mut self,
-        conn: &Connection,
-        external_id: &str,
-        all_or_none: bool,
-    ) -> Result<Vec<Result<()>>>;
-    async fn delete(&mut self, conn: &Connection, all_or_none: bool) -> Result<Vec<Result<()>>>;
-}
-
-#[async_trait]
-impl SObjectCollection for Vec<SObject> {
-    async fn create(&mut self, conn: Connection, all_or_none: bool) -> Result<Vec<Result<()>>> {
-        let request = SObjectCollectionCreateRequest::new(self, all_or_none)?;
-
-        Ok(conn
-            .execute(&request)
-            .await?
-            .into_iter()
-            .enumerate()
-            .map(|(i, r)| {
-                if r.success {
-                    self.get_mut(i).unwrap().set_id(r.id.unwrap());
-                }
-
-                r.into()
-            })
-            .collect())
-    }
-
-    async fn update(&mut self, conn: &Connection, all_or_none: bool) -> Result<Vec<Result<()>>> {
-        let request = SObjectCollectionUpdateRequest::new(self, all_or_none)?;
-
-        Ok(conn
-            .execute(&request)
-            .await?
-            .into_iter()
-            .map(|r| r.into())
-            .collect())
-    }
-
-    async fn upsert(
-        &mut self,
-        conn: &Connection,
-        external_id: &str,
-        all_or_none: bool,
-    ) -> Result<Vec<Result<()>>> {
-        todo!()
-    }
-
-    async fn delete(&mut self, conn: &Connection, all_or_none: bool) -> Result<Vec<Result<()>>> {
-        todo!()
-    }
-}
-
 #[derive(Debug, PartialEq, Clone)]
 pub struct SObject {
     pub sobject_type: SObjectType,
@@ -298,73 +231,14 @@ impl SObject {
         }
     }
 
+    // TODO: similar methods for each data type.
     pub fn with_string(mut self, key: &str, value: &str) -> SObject {
         self.put(key, FieldValue::String(value.to_owned()));
         self
     }
 
-    pub async fn query(
-        conn: &Connection,
-        sobject_type: &SObjectType,
-        query: &str,
-        all: bool,
-    ) -> Result<BufferedLocatorStream> {
-        let request = QueryRequest::new(sobject_type, query, all);
-
-        Ok(conn.execute(&request).await?)
-    }
-
-    pub async fn query_vec(
-        conn: &Connection,
-        sobject_type: &SObjectType,
-        query: &str,
-        all: bool,
-    ) -> Result<Vec<SObject>> {
-        Ok(Self::query(conn, sobject_type, query, all)
-            .await?
-            .collect::<Result<Vec<SObject>>>()
-            .await?)
-    }
-
-    pub async fn create(&mut self, conn: &Connection) -> Result<()> {
-        let request = SObjectCreateRequest::new(self)?;
-        let result = conn.execute(&request).await?;
-
-        if result.success {
-            self.set_id(result.id.unwrap());
-            Ok(())
-        } else {
-            Err(result.into())
-        }
-    }
-
-    pub async fn update(&mut self, conn: &Connection) -> Result<()> {
-        conn.execute(&SObjectUpdateRequest::new(self)?).await
-    }
-
-    pub async fn upsert(&mut self, conn: &Connection, external_id: &str) -> Result<()> {
-        conn.execute(&SObjectUpsertRequest::new(self, external_id)?)
-            .await?
-            .into()
-    }
-
-    pub async fn delete(&mut self, conn: &Connection) -> Result<()> {
-        let result = conn.execute(&SObjectDeleteRequest::new(self)?).await;
-
-        if let Ok(_) = &result {
-            self.put("id", FieldValue::Null);
-        }
-
-        result
-    }
-
-    pub async fn retrieve(
-        conn: &Connection,
-        sobject_type: &SObjectType,
-        id: SalesforceId,
-    ) -> Result<SObject> {
-        conn.execute(&SObjectRetrieveRequest::new(id, sobject_type))
-            .await
+    pub fn get(&self, key: &str) -> Option<&FieldValue> {
+        self.fields.get(&key.to_lowercase())
     }
 
     pub fn put(&mut self, key: &str, val: FieldValue) {
@@ -381,18 +255,6 @@ impl SObject {
 
     pub fn set_id(&mut self, id: SalesforceId) {
         self.put("id", FieldValue::Id(id));
-    }
-
-    pub fn get(&self, key: &str) -> Option<&FieldValue> {
-        self.fields.get(&key.to_lowercase())
-    }
-
-    pub fn get_binary_blob(&self, _key: &str) {
-        unimplemented!();
-    }
-
-    pub fn has_reference_parameters(&self) -> bool {
-        false
     }
 
     pub(crate) fn from_csv(
