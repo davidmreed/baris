@@ -11,6 +11,8 @@ pub enum SalesforceError {
     CannotRefresh,
     SObjectCollectionError,
     ResponseBodyExpected,
+    UnknownError,
+    NotAuthenticated,
 }
 
 impl fmt::Display for SalesforceError {
@@ -29,6 +31,15 @@ impl fmt::Display for SalesforceError {
             }
             SalesforceError::ResponseBodyExpected => {
                 write!(f, "A response body was expected, but is not present")
+            }
+            SalesforceError::UnknownError => {
+                write!(f, "An unknown error occurred")
+            }
+            SalesforceError::NotAuthenticated => {
+                write!(
+                    f,
+                    "Data cannot be obtained until an authorization refresh is executed"
+                )
             }
         }
     }

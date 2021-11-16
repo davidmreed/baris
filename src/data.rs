@@ -5,20 +5,23 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{Error, Result};
+use chrono::{FixedOffset, Utc};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::json;
-use tokio_stream::StreamExt;
 
 use crate::rest::describe::SObjectDescribe;
-use crate::rest::query::QueryRequest;
-use crate::streams::BufferedLocatorStream;
 use crate::Connection;
 
 use super::errors::SalesforceError;
-use super::rest::{
-    SObjectCreateRequest, SObjectDeleteRequest, SObjectRetrieveRequest, SObjectUpdateRequest,
-    SObjectUpsertRequest,
-};
+
+// The Salesforce API's required datetime format is mostly RFC 3339,
+// but requires _exactly_ three fractional second digits (millisecond resultion).
+// Using the wrong number of fractional digits can cause incorrect behavior
+// in the Bulk API.
+// See https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/intro_valid_date_formats.htm
+const DATETIME_FORMAT: &str = "%Y-%m-%dT%T.%.3fZ";
+const DATE_FORMAT: &str = "%Y-%m-%d";
+const TIME_FORMAT: &str = "%T.%.3fZ"; // TODO: validate
 
 #[derive(Serialize, Deserialize, Copy, Clone, PartialEq)]
 #[serde(try_from = "String")]
@@ -27,6 +30,8 @@ pub struct SalesforceId {
 }
 
 // TODO: store as 15-char and render as 18 on string conversion.
+// OR store as 18 (because the API always returns 18) and
+// don't verify on 18-character input.
 impl SalesforceId {
     pub fn new(id: &str) -> Result<SalesforceId, SalesforceError> {
         const ALNUMS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
@@ -69,7 +74,7 @@ impl TryFrom<&str> for SalesforceId {
     type Error = SalesforceError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        SalesforceId::new(&value)
+        SalesforceId::new(value)
     }
 }
 
@@ -85,20 +90,45 @@ impl fmt::Display for SalesforceId {
     }
 }
 
-#[derive(Debug, PartialEq)]
+pub type DateTime = chrono::DateTime<chrono::Utc>;
+pub type Time = chrono::NaiveTime;
+pub type Date = chrono::NaiveDate;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Address {
+    pub city: Option<String>,
+    pub country: Option<String>,
+    pub country_code: Option<String>,
+    pub geocode_accuracy: Option<String>, // TODO: this should be an enum.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub postal_code: Option<String>,
+    pub state: Option<String>,
+    pub state_code: Option<String>,
+    pub street: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum FieldValue {
-    Integer(i64),
+    // TODO: JunctionIdList?
+    Address(Address),
+    Integer(i64), // TODO: long/short?
     Double(f64),
     Boolean(bool),
     String(String),
-    DateTime(String),
-    Time(String),
-    Date(String),
+    DateTime(DateTime),
+    Time(Time),
+    Date(Date),
     Id(SalesforceId),
+    Relationship(SObject),
+    Blob(String), // TODO: implement Blobs
     Null,
+    // TODO: implement reference parameters
 }
 
 impl FieldValue {
+    // TODO: ensure these are complete.
     pub fn is_int(&self) -> bool {
         if let FieldValue::Integer(_) = &self {
             true
@@ -171,65 +201,23 @@ impl FieldValue {
         }
     }
 
-    pub fn get_soap_type(&self) -> SoapType {
-        match &self {
-            FieldValue::Integer(_) => SoapType::Integer,
-            FieldValue::Double(_) => SoapType::Double,
-            FieldValue::Boolean(_) => SoapType::Boolean,
-            FieldValue::String(_) => SoapType::String,
-            FieldValue::DateTime(_) => SoapType::DateTime,
-            FieldValue::Time(_) => SoapType::Time,
-            FieldValue::Date(_) => SoapType::Date,
-            FieldValue::Id(_) => SoapType::Id,
-            _ => SoapType::Any, // TODO: this is probably not an optimal solution for nulls.
-        }
-    }
-
     pub fn from_str(input: &str, field_type: &SoapType) -> Result<FieldValue> {
         match field_type {
             SoapType::Integer => Ok(FieldValue::Integer(input.parse()?)),
             SoapType::Double => Ok(FieldValue::Double(input.parse()?)),
             SoapType::Boolean => Ok(FieldValue::Boolean(input.parse()?)),
             SoapType::String => Ok(FieldValue::String(input.to_owned())),
-            SoapType::DateTime => Ok(FieldValue::DateTime(input.to_owned())),
-            SoapType::Time => Ok(FieldValue::Time(input.to_owned())),
-            SoapType::Date => Ok(FieldValue::Date(input.to_owned())),
+            // TODO: validate chrono parse behavior against API.
+            SoapType::DateTime => Ok(FieldValue::DateTime(input.parse()?)),
+            SoapType::Time => Ok(FieldValue::Time(input.parse()?)),
+            SoapType::Date => Ok(FieldValue::Date(input.parse()?)),
             SoapType::Id => Ok(FieldValue::Id(input.try_into()?)),
             _ => panic!("Unsupported type"), // TODO
         }
     }
 }
 
-pub trait SObjectCollection {
-    fn create(&mut self, all_or_none: bool) -> Result<()>;
-    fn update(&self, all_or_none: bool) -> Result<()>;
-    fn upsert(&mut self, external_id: &str, all_or_none: bool) -> Result<()>;
-    fn delete(&mut self, all_or_none: bool) -> Result<()>;
-    fn retrieve(ids: Vec<SalesforceId>, fields: Vec<String>) -> Result<Vec<Option<SObject>>>;
-}
-
-impl SObjectCollection for Vec<SObject> {
-    fn create(&mut self, all_or_none: bool) -> Result<()> {
-        todo!()
-    }
-
-    fn update(&self, all_or_none: bool) -> Result<()> {
-        todo!()
-    }
-
-    fn upsert(&mut self, external_id: &str, all_or_none: bool) -> Result<()> {
-        todo!()
-    }
-
-    fn delete(&mut self, all_or_none: bool) -> Result<()> {
-        todo!()
-    }
-
-    fn retrieve(ids: Vec<SalesforceId>, fields: Vec<String>) -> Result<Vec<Option<SObject>>> {
-        todo!()
-    }
-}
-
+#[derive(Debug, PartialEq, Clone)]
 pub struct SObject {
     pub sobject_type: SObjectType,
     pub fields: HashMap<String, FieldValue>,
@@ -243,100 +231,18 @@ impl SObject {
         }
     }
 
-    pub async fn query(
-        conn: &Connection,
-        sobject_type: &SObjectType,
-        query: &str,
-        all: bool,
-    ) -> Result<BufferedLocatorStream> {
-        let request = QueryRequest::new(sobject_type, query, all);
-
-        Ok(conn.execute(&request).await?)
+    // TODO: similar methods for each data type.
+    pub fn with_string(mut self, key: &str, value: &str) -> SObject {
+        self.put(key, FieldValue::String(value.to_owned()));
+        self
     }
 
-    pub async fn query_vec(
-        conn: &Connection,
-        sobject_type: &SObjectType,
-        query: &str,
-        all: bool,
-    ) -> Result<Vec<SObject>> {
-        Ok(Self::query(conn, sobject_type, query, all)
-            .await?
-            .collect::<Result<Vec<SObject>>>()
-            .await?)
+    pub fn get(&self, key: &str) -> Option<&FieldValue> {
+        self.fields.get(&key.to_lowercase())
     }
 
-    pub async fn create(&mut self, conn: &Connection) -> Result<()> {
-        let request = SObjectCreateRequest::new(self)?;
-        let result = conn.execute(&request).await?;
-
-        if result.success {
-            self.set_id(result.id.unwrap())?;
-            Ok(())
-        } else {
-            Err(result.into())
-        }
-    }
-
-    pub async fn update(&mut self, conn: &Connection) -> Result<()> {
-        conn.execute(&SObjectUpdateRequest::new(self)?).await
-    }
-
-    pub async fn upsert(&mut self, conn: &Connection, external_id: &str) -> Result<()> {
-        conn.execute(&SObjectUpsertRequest::new(self, external_id)?)
-            .await?
-            .into()
-    }
-
-    pub async fn delete(&mut self, conn: &Connection) -> Result<()> {
-        let result = conn.execute(&SObjectDeleteRequest::new(self)?).await;
-
-        if let Ok(_) = &result {
-            self.put("id", FieldValue::Null)?;
-        }
-
-        result
-    }
-
-    pub async fn retrieve(
-        conn: &Connection,
-        sobject_type: &SObjectType,
-        id: SalesforceId,
-    ) -> Result<SObject> {
-        conn.execute(&SObjectRetrieveRequest::new(id, sobject_type))
-            .await
-    }
-
-    pub fn put(&mut self, key: &str, val: FieldValue) -> Result<()> {
-        // Locate the describe for this field.
-        let describe = self.sobject_type.get_describe().get_field(key);
-
-        if describe.is_none() {
-            return Err(SalesforceError::SchemaError(format!(
-                "Field {} does not exist or is not accessible",
-                key
-            ))
-            .into());
-        }
-
-        let describe = describe.unwrap();
-
-        // Validate that the provided value matches the type of this field
-        // and satisfies any constraints we can check locally.
-        let soap_type = val.get_soap_type();
-        if describe.soap_type != soap_type && soap_type != SoapType::Any {
-            Err(SalesforceError::SchemaError(format!(
-                "Wrong type of value ({:?}) for field {}.{} (type {:?})",
-                val.get_soap_type(),
-                self.sobject_type.get_api_name(),
-                key,
-                describe.soap_type
-            ))
-            .into())
-        } else {
-            self.fields.insert(key.to_lowercase(), val);
-            Ok(())
-        }
+    pub fn put(&mut self, key: &str, val: FieldValue) {
+        self.fields.insert(key.to_lowercase(), val);
     }
 
     pub fn get_id(&self) -> Option<&SalesforceId> {
@@ -347,20 +253,8 @@ impl SObject {
         }
     }
 
-    pub fn set_id(&mut self, id: SalesforceId) -> Result<()> {
-        self.put("id", FieldValue::Id(id))
-    }
-
-    pub fn get(&self, key: &str) -> Option<&FieldValue> {
-        self.fields.get(&key.to_lowercase())
-    }
-
-    pub fn get_binary_blob(&self, _key: &str) {
-        unimplemented!();
-    }
-
-    pub fn has_reference_parameters(&self) -> bool {
-        false
+    pub fn set_id(&mut self, id: SalesforceId) {
+        self.put("id", FieldValue::Id(id));
     }
 
     pub(crate) fn from_csv(
@@ -377,11 +271,30 @@ impl SObject {
                 ret.put(
                     &k.to_lowercase(),
                     FieldValue::from_str(rec.get(k).unwrap(), &describe.soap_type)?,
-                )?;
+                );
             }
         }
 
         Ok(ret)
+    }
+
+    pub async fn from_json_with_type(
+        conn: &mut Connection,
+        value: &serde_json::Value,
+    ) -> Result<SObject> {
+        // TODO: clean up this method.
+        if let serde_json::Value::Object(content) = value {
+            let attributes = content.get("attributes").unwrap();
+            if let serde_json::Value::Object(attrib) = attributes {
+                let sobject_type = conn
+                    .get_type(attrib.get("type").unwrap().as_str().unwrap())
+                    .await?;
+
+                return SObject::from_json(value, &sobject_type);
+            }
+        }
+
+        Err(SalesforceError::UnknownError.into())
     }
 
     pub fn from_json(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<SObject> {
@@ -395,7 +308,7 @@ impl SObject {
                     ret.put(
                         &k.to_lowercase(),
                         FieldValue::from_json(value.get(k).unwrap(), describe.soap_type)?,
-                    )?;
+                    );
                 }
             }
             Ok(ret)
@@ -456,11 +369,16 @@ impl From<&FieldValue> for serde_json::Value {
             }
             FieldValue::Boolean(i) => serde_json::Value::Bool(*i),
             FieldValue::String(i) => serde_json::Value::String(i.clone()),
-            FieldValue::DateTime(i) => serde_json::Value::String(i.clone()),
-            FieldValue::Time(i) => serde_json::Value::String(i.clone()),
-            FieldValue::Date(i) => serde_json::Value::String(i.clone()),
+            FieldValue::DateTime(i) => {
+                serde_json::Value::String(i.format(DATETIME_FORMAT).to_string())
+            }
+            FieldValue::Time(i) => serde_json::Value::String(i.format(TIME_FORMAT).to_string()),
+            FieldValue::Date(i) => serde_json::Value::String(i.format(DATE_FORMAT).to_string()),
             FieldValue::Id(i) => serde_json::Value::String(i.to_string()),
             FieldValue::Null => serde_json::Value::Null,
+            FieldValue::Address(address) => serde_json::to_value(address).unwrap(), // This should be infallible
+            FieldValue::Relationship(_) => todo!(),
+            FieldValue::Blob(_) => todo!(),
         }
     }
 }
@@ -478,11 +396,14 @@ impl FieldValue {
             FieldValue::Double(i) => format!("{}", i),
             FieldValue::Boolean(i) => format!("{}", i),
             FieldValue::String(i) => i.clone(),
-            FieldValue::DateTime(i) => i.clone(),
-            FieldValue::Time(i) => i.clone(),
-            FieldValue::Date(i) => i.clone(),
+            FieldValue::DateTime(i) => i.format(DATETIME_FORMAT).to_string(),
+            FieldValue::Time(i) => i.format(TIME_FORMAT).to_string(),
+            FieldValue::Date(i) => i.format(DATE_FORMAT).to_string(),
             FieldValue::Id(i) => i.to_string(),
             FieldValue::Null => "".to_string(),
+            FieldValue::Address(_) => todo!(),
+            FieldValue::Relationship(_) => todo!(),
+            FieldValue::Blob(_) => todo!(),
         }
     }
 
@@ -499,17 +420,21 @@ impl FieldValue {
             }
             SoapType::Date => {
                 if let serde_json::Value::String(b) = value {
-                    return Ok(FieldValue::Date(b.to_string()));
+                    // TODO: this returns a DateTime<FixedOffset> - issue?
+                    return Ok(FieldValue::Date(Date::parse_from_str(b, DATE_FORMAT)?));
                 }
             }
             SoapType::DateTime => {
                 if let serde_json::Value::String(b) = value {
-                    return Ok(FieldValue::DateTime(b.to_string()));
+                    return Ok(FieldValue::DateTime(
+                        chrono::DateTime::<FixedOffset>::parse_from_str(b, DATETIME_FORMAT)?
+                            .with_timezone(&Utc),
+                    ));
                 }
             }
             SoapType::Time => {
                 if let serde_json::Value::String(b) = value {
-                    return Ok(FieldValue::Time(b.to_string()));
+                    return Ok(FieldValue::Time(Time::parse_from_str(b, TIME_FORMAT)?));
                 }
             }
             SoapType::Double => {
@@ -544,6 +469,13 @@ pub struct SObjectTypeBody {
     describe: SObjectDescribe,
 }
 
+impl PartialEq for SObjectTypeBody {
+    fn eq(&self, other: &Self) -> bool {
+        self.api_name == other.api_name
+    }
+}
+
+#[derive(Debug, PartialEq)] // TODO: is the derive of PartialEq OK here?
 pub struct SObjectType(Arc<SObjectTypeBody>);
 
 impl Deref for SObjectType {

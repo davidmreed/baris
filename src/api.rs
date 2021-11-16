@@ -4,17 +4,18 @@ extern crate serde_derive;
 extern crate serde_json;
 
 use std::collections::HashMap;
+use std::mem;
 use std::ops::Deref;
 use std::sync::Arc;
 
 use super::data::SObjectType;
 use super::errors::SalesforceError;
 
-use crate::auth::AuthDetails;
+use crate::auth::Authentication;
 use crate::rest::describe::{SObjectDescribe, SObjectDescribeRequest};
 
 use anyhow::{Error, Result};
-use reqwest::{header, Client, Method, StatusCode, Url};
+use reqwest::{header, Client, Method, RequestBuilder, StatusCode, Url};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
@@ -32,10 +33,6 @@ pub trait SalesforceRequest {
         None
     }
 
-    fn has_reference_parameters(&self) -> bool {
-        false
-    }
-
     fn get_result(&self, conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue>;
 }
 
@@ -44,7 +41,7 @@ pub trait CompositeFriendlyRequest: SalesforceRequest {}
 pub struct ConnectionBody {
     pub(crate) api_version: String,
     sobject_types: RwLock<HashMap<String, SObjectType>>,
-    auth: RwLock<AuthDetails>,
+    auth: RwLock<Box<dyn Authentication>>,
     auth_refresh: Mutex<()>,
     auth_global_lock: Mutex<()>,
 }
@@ -68,7 +65,7 @@ impl Clone for Connection {
 }
 
 impl Connection {
-    pub fn new(auth: AuthDetails, api_version: &str) -> Result<Connection> {
+    pub fn new(auth: Box<dyn Authentication>, api_version: &str) -> Result<Connection> {
         Ok(Connection {
             0: Arc::new(ConnectionBody {
                 api_version: api_version.to_string(),
@@ -89,7 +86,9 @@ impl Connection {
 
         let lock = self.auth.read().await;
 
-        Ok(Url::parse(lock.get_instance_url())?
+        Ok(lock
+            .get_instance_url() // TODO: this is why the refresh is in this mehtod (above )
+            .await?
             .join(&format!("/services/data/{}/", self.api_version))?)
     }
 
@@ -114,11 +113,6 @@ impl Connection {
             .and_then(|s| Some(s.clone()))
     }
 
-    async fn perform_refresh(mut auth: AuthDetails) -> Result<AuthDetails> {
-        auth.refresh_access_token().await?;
-        Ok(auth)
-    }
-
     pub async fn refresh_access_token(&self) -> Result<()> {
         // First, obtain the global auth mutex so that our interactions
         // with the two subsidiary locks are atomic.
@@ -139,10 +133,7 @@ impl Connection {
 
         // If we are the task that will be performing this refresh, do so.
         if let Ok(_) = auth_permission_handle {
-            let cloned_auth = (*auth_lock.as_ref().unwrap()).clone();
-
-            let result = Connection::perform_refresh(cloned_auth).await?;
-            *auth_lock.unwrap() = result;
+            auth_lock.unwrap().refresh_access_token().await?;
         } else {
             // We didn't get the mutex lock, which means someone else is running the operation,
             // and we do not have a write lock on the auth details.
@@ -188,12 +179,13 @@ impl Connection {
         Ok(Client::builder().default_headers(headers).build()?)
     }
 
-    pub async fn execute<K, T>(&self, request: &K) -> Result<T>
+    async fn build_request<K>(&self, request: &K) -> Result<RequestBuilder>
     where
-        K: SalesforceRequest<ReturnValue = T>,
+        K: SalesforceRequest,
     {
         let url = self.get_base_url().await?.join(&request.get_url())?;
         println!("I have URL {}", url);
+
         let mut builder = self.get_client().await?.request(request.get_method(), url);
 
         let method = request.get_method();
@@ -208,8 +200,22 @@ impl Connection {
             builder = builder.query(&params);
         }
 
-        // TODO: interpret common errors here, such as not found and access token expired.
-        let result = builder.send().await?.error_for_status()?;
+        Ok(builder)
+    }
+
+    pub async fn execute<K, T>(&self, request: &K) -> Result<T>
+    where
+        K: SalesforceRequest<ReturnValue = T>,
+    {
+        let mut result = self.build_request(request).await?.send().await?;
+
+        // If the token is expired, refresh it and try again.
+        if result.status().as_u16() == 401 {
+            self.refresh_access_token().await?;
+            result = self.build_request(request).await?.send().await?
+        }
+
+        let result = result.error_for_status()?;
 
         if result.status() == StatusCode::NO_CONTENT {
             Ok(request.get_result(&self, None)?)

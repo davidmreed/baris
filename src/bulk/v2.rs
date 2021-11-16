@@ -8,13 +8,12 @@ use tokio::task::{spawn, JoinHandle};
 use tokio::time::sleep;
 
 use crate::{
+    data::DateTime,
     streams::{BufferedLocatorManager, BufferedLocatorStream, BufferedLocatorStreamState},
     Connection, SObject, SObjectType, SalesforceError, SalesforceId,
 };
 
 const POLL_INTERVAL: u64 = 10;
-
-type Timestamp = chrono::DateTime<chrono::Utc>;
 
 #[derive(Copy, Clone)]
 pub struct BulkQueryJob(SalesforceId);
@@ -83,8 +82,8 @@ pub struct BulkQueryJobDetail {
     operation: BulkQueryOperation,
     object: String,
     created_by_id: SalesforceId,
-    created_date: Timestamp,
-    system_modstamp: Timestamp,
+    created_date: DateTime,
+    system_modstamp: DateTime,
     state: BulkJobStatus,
     concurrency_mode: BulkApiConcurrencyMode,
     content_type: BulkApiContentType,
