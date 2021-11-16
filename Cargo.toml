@@ -1,5 +1,5 @@
 [package]
-name = "oxideforce"
+name = "baris"
 version = "0.1.0"
 authors = ["David Reed <david@ktema.org>"]
 edition = "2018"
@@ -18,5 +18,5 @@ csv = "1.1"
 chrono = { version = "0.4", features = ["serde"]}
 
 [lib]
-name = "oxideforce"
+name = "baris"
 path = "src/lib.rs"
