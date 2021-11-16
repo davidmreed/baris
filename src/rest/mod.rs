@@ -2,7 +2,7 @@ use reqwest::Method;
 use serde_json::Value;
 
 use crate::api::CompositeFriendlyRequest;
-use crate::{api::SalesforceRequest, rest::describe::SObjectDescribe};
+use crate::api::SalesforceRequest;
 use crate::{Connection, SObject, SObjectType, SalesforceError, SalesforceId};
 
 use serde_derive::Deserialize;
@@ -84,12 +84,68 @@ impl<'a> CompositeFriendlyRequest for SObjectCreateRequest<'a> {}
 
 // Result structures for DML operations
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DmlError {
     pub fields: Vec<String>,
     pub message: String,
-    pub error_code: String,
+    // The sObject Rows endpoints use errorCode:
+    // https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/dome_upsert.htm
+    pub error_code: Option<String>,
+    // The sObject Collections endpoints use statusCode:
+    // https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/resources_composite_sobjects_collections_create.htm
+    pub status_code: Option<String>,
+}
+
+impl DmlError {
+    pub fn get_error_code(&self) -> Option<&String> {
+        if self.error_code.is_some() {
+            self.error_code.as_ref()
+        } else {
+            self.status_code.as_ref()
+        }
+    }
+}
+
+// TODO: replace CreateResult with this struct
+// TODO: review sObject Rows resources to see which really return this struct.
+#[derive(Debug, Deserialize)]
+pub struct DmlResultWithId {
+    pub id: Option<SalesforceId>,
+    pub created: Option<bool>,
+    pub success: bool,
+    pub errors: Vec<DmlError>,
+}
+
+impl Into<Result<Option<SalesforceId>>> for DmlResultWithId {
+    fn into(self) -> Result<Option<SalesforceId>> {
+        if !self.success {
+            if self.errors.len() > 0 {
+                // TODO: handle multiple errors, if this ever happens.
+                let err = self.errors[0].clone();
+                Err(err.into())
+            } else {
+                Err(SalesforceError::UnknownError.into())
+            }
+        } else {
+            Ok(self.id)
+        }
+    }
+}
+
+impl Into<Result<()>> for DmlResultWithId {
+    fn into(self) -> Result<()> {
+        if !self.success {
+            if self.errors.len() > 0 {
+                // TODO: handle multiple errors, if this ever happens.
+                Err(self.errors[0].clone().into())
+            } else {
+                Err(SalesforceError::UnknownError.into())
+            }
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,10 +168,11 @@ impl Into<Result<()>> for DmlResult {
 
 impl fmt::Display for DmlError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let error = &"Unknown error".to_string();
         write!(
             f,
             "DML error: {} ({}) on fields {}",
-            self.error_code,
+            self.get_error_code().unwrap_or_else(|| error),
             self.message,
             self.fields.join("\n")
         )
@@ -172,7 +229,9 @@ impl<'a> SalesforceRequest for SObjectUpdateRequest<'a> {
 impl<'a> CompositeFriendlyRequest for SObjectUpdateRequest<'a> {}
 
 // SObject Upsert Requests
-
+// TODO: note unique return semantics at
+// https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/resources_composite_sobjects_collections_create.htm
+// There is an API version change around response struct and HTTP code.
 pub struct SObjectUpsertRequest<'a> {
     sobject: &'a mut SObject,
     external_id: String,

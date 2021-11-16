@@ -14,7 +14,7 @@ use crate::auth::AuthDetails;
 use crate::rest::describe::{SObjectDescribe, SObjectDescribeRequest};
 
 use anyhow::{Error, Result};
-use reqwest::{header, Client, Method, StatusCode, Url};
+use reqwest::{header, Client, Method, RequestBuilder, StatusCode, Url};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
@@ -188,12 +188,13 @@ impl Connection {
         Ok(Client::builder().default_headers(headers).build()?)
     }
 
-    pub async fn execute<K, T>(&self, request: &K) -> Result<T>
+    async fn build_request<K>(&self, request: &K) -> Result<RequestBuilder>
     where
-        K: SalesforceRequest<ReturnValue = T>,
+        K: SalesforceRequest,
     {
         let url = self.get_base_url().await?.join(&request.get_url())?;
         println!("I have URL {}", url);
+
         let mut builder = self.get_client().await?.request(request.get_method(), url);
 
         let method = request.get_method();
@@ -208,8 +209,22 @@ impl Connection {
             builder = builder.query(&params);
         }
 
-        // TODO: interpret common errors here, such as not found and access token expired.
-        let result = builder.send().await?.error_for_status()?;
+        Ok(builder)
+    }
+
+    pub async fn execute<K, T>(&self, request: &K) -> Result<T>
+    where
+        K: SalesforceRequest<ReturnValue = T>,
+    {
+        let mut result = self.build_request(request).await?.send().await?;
+
+        // If the token is expired, refresh it and try again.
+        if result.status().as_u16() == 401 {
+            self.refresh_access_token().await?;
+            result = self.build_request(request).await?.send().await?
+        }
+
+        let result = result.error_for_status()?;
 
         if result.status() == StatusCode::NO_CONTENT {
             Ok(request.get_result(&self, None)?)

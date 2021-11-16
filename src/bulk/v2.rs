@@ -8,8 +8,9 @@ use tokio::task::{spawn, JoinHandle};
 use tokio::time::sleep;
 
 use crate::{
+    data::DateTime,
     streams::{BufferedLocatorManager, BufferedLocatorStream, BufferedLocatorStreamState},
-    Connection, DateTime, SObject, SObjectType, SalesforceError, SalesforceId,
+    Connection, SObject, SObjectType, SalesforceError, SalesforceId,
 };
 
 const POLL_INTERVAL: u64 = 10;

@@ -1,8 +1,11 @@
 use anyhow::Result;
+use futures::future::join_all;
+use itertools::Itertools;
 use std::env;
 
 use crate::{
     auth::{AccessTokenAuth, AuthDetails},
+    data::SObjectCollection,
     Connection, FieldValue, SObject,
 };
 
@@ -31,7 +34,7 @@ async fn test_individual_sobjects() -> Result<()> {
     .len();
 
     let mut account = SObject::new(&account_type);
-    account.put("Name", FieldValue::String("Test".to_owned()))?;
+    account.put("Name", FieldValue::String("Test".to_owned()));
 
     account.create(&conn).await?;
 
@@ -46,7 +49,7 @@ async fn test_individual_sobjects() -> Result<()> {
     assert!(accounts.len() == before_count + 1);
     assert!(accounts[0].get("Name").unwrap() == &FieldValue::String("Test".to_owned()));
 
-    account.put("Name", FieldValue::String("Test 2".to_owned()))?;
+    account.put("Name", FieldValue::String("Test 2".to_owned()));
     account.update(&conn).await?;
 
     let updated_account =
@@ -55,5 +58,31 @@ async fn test_individual_sobjects() -> Result<()> {
 
     accounts[0].delete(&conn).await?;
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_collections() -> Result<()> {
+    let mut conn = get_test_connection()?;
+    let account_type = conn.get_type("Account").await?;
+
+    let mut sobject_chunks: Vec<Vec<SObject>> = (0..1000)
+        .map(|i| SObject::new(&account_type).with_string("Name", &format!("Account {}", i)))
+        .chunks(200)
+        .into_iter()
+        .map(|v| v.collect::<Vec<SObject>>())
+        .collect();
+
+    join_all(
+        sobject_chunks
+            .iter_mut()
+            .map(|v| v.create(conn.clone(), true)),
+    )
+    .await
+    .into_iter()
+    .collect::<Result<Vec<Vec<Result<()>>>>>()?
+    .into_iter()
+    .flatten()
+    .collect::<Result<Vec<()>>>()?;
     Ok(())
 }

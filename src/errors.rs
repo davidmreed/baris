@@ -11,6 +11,7 @@ pub enum SalesforceError {
     CannotRefresh,
     SObjectCollectionError,
     ResponseBodyExpected,
+    UnknownError,
 }
 
 impl fmt::Display for SalesforceError {
@@ -29,6 +30,9 @@ impl fmt::Display for SalesforceError {
             }
             SalesforceError::ResponseBodyExpected => {
                 write!(f, "A response body was expected, but is not present")
+            }
+            SalesforceError::UnknownError => {
+                write!(f, "An unknown error occurred")
             }
         }
     }
