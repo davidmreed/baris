@@ -1,9 +1,13 @@
+use std::marker::PhantomData;
+
 use anyhow::Result;
+use async_trait::async_trait;
 use reqwest::Method;
 use serde_json::Value;
 
 use crate::api::CompositeFriendlyRequest;
 use crate::api::SalesforceRequest;
+use crate::data::SObjectRepresentation;
 use crate::{Connection, FieldValue, SObject, SObjectType, SalesforceError, SalesforceId};
 
 use super::DmlError;
@@ -11,42 +15,60 @@ use super::{DmlResult, DmlResultWithId};
 
 // SObject class implementation
 
-impl SObject {
-    pub async fn create(&mut self, conn: &Connection) -> Result<()> {
+#[async_trait]
+pub trait SObjectDML: Sized {
+    async fn create(&mut self, conn: &Connection) -> Result<()>;
+    async fn update(&mut self, conn: &Connection) -> Result<()>;
+    async fn upsert(&mut self, conn: &Connection, external_id: &str) -> Result<()>;
+    async fn delete(&mut self, conn: &Connection) -> Result<()>;
+    async fn retrieve(
+        conn: &Connection,
+        sobject_type: &SObjectType,
+        id: SalesforceId,
+    ) -> Result<Self>;
+}
+
+#[async_trait]
+impl<T> SObjectDML for T
+where
+    T: SObjectRepresentation,
+{
+    async fn create(&mut self, conn: &Connection) -> Result<()> {
         let request = SObjectCreateRequest::new(self)?;
         let result = conn.execute(&request).await?;
 
         if result.success {
-            self.set_id(result.id.unwrap());
+            self.set_id(Some(result.id.unwrap()));
         }
         result.into()
     }
 
-    pub async fn update(&mut self, conn: &Connection) -> Result<()> {
+    async fn update(&mut self, conn: &Connection) -> Result<()> {
         conn.execute(&SObjectUpdateRequest::new(self)?).await
     }
 
-    pub async fn upsert(&mut self, conn: &Connection, external_id: &str) -> Result<()> {
+    async fn upsert(&mut self, conn: &Connection, external_id: &str) -> Result<()> {
+        // TODO: ensure we set the Id field.
         conn.execute(&SObjectUpsertRequest::new(self, external_id)?)
             .await?
             .into()
     }
 
-    pub async fn delete(&mut self, conn: &Connection) -> Result<()> {
+    async fn delete(&mut self, conn: &Connection) -> Result<()> {
         let result = conn.execute(&SObjectDeleteRequest::new(self)?).await;
 
         if let Ok(_) = &result {
-            self.put("id", FieldValue::Null);
+            self.set_id(None);
         }
 
         result
     }
 
-    pub async fn retrieve(
+    async fn retrieve(
         conn: &Connection,
         sobject_type: &SObjectType,
         id: SalesforceId,
-    ) -> Result<SObject> {
+    ) -> Result<Self> {
         conn.execute(&SObjectRetrieveRequest::new(id, sobject_type))
             .await
     }
@@ -54,12 +76,18 @@ impl SObject {
 
 // SObject Create Requests
 
-pub struct SObjectCreateRequest<'a> {
-    sobject: &'a mut SObject,
+pub struct SObjectCreateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
+    sobject: &'a mut T,
 }
 
-impl<'a> SObjectCreateRequest<'a> {
-    pub fn new(sobject: &'a mut SObject) -> Result<Self> {
+impl<'a, T> SObjectCreateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
+    pub fn new(sobject: &'a mut T) -> Result<Self> {
         if sobject.get_id().is_some() {
             return Err(SalesforceError::RecordExistsError.into());
         }
@@ -68,7 +96,10 @@ impl<'a> SObjectCreateRequest<'a> {
     }
 }
 
-impl<'a> SalesforceRequest for SObjectCreateRequest<'a> {
+impl<'a, T> SalesforceRequest for SObjectCreateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
     type ReturnValue = DmlResultWithId;
 
     fn get_body(&self) -> Option<Value> {
@@ -76,7 +107,7 @@ impl<'a> SalesforceRequest for SObjectCreateRequest<'a> {
     }
 
     fn get_url(&self) -> String {
-        format!("sobjects/{}/", self.sobject.sobject_type.get_api_name())
+        format!("sobjects/{}/", self.sobject.get_api_name())
     }
 
     fn get_method(&self) -> Method {
@@ -92,16 +123,22 @@ impl<'a> SalesforceRequest for SObjectCreateRequest<'a> {
     }
 }
 
-impl<'a> CompositeFriendlyRequest for SObjectCreateRequest<'a> {}
+impl<'a, T> CompositeFriendlyRequest for SObjectCreateRequest<'a, T> where T: SObjectRepresentation {}
 
 // SObject Update Requests
 
-pub struct SObjectUpdateRequest<'a> {
-    sobject: &'a mut SObject,
+pub struct SObjectUpdateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
+    sobject: &'a mut T,
 }
 
-impl<'a> SObjectUpdateRequest<'a> {
-    pub fn new(sobject: &'a mut SObject) -> Result<SObjectUpdateRequest> {
+impl<'a, T> SObjectUpdateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
+    pub fn new(sobject: &'a mut T) -> Result<SObjectUpdateRequest<T>> {
         if sobject.get_id().is_none() {
             Err(SalesforceError::RecordDoesNotExistError.into())
         } else {
@@ -110,7 +147,10 @@ impl<'a> SObjectUpdateRequest<'a> {
     }
 }
 
-impl<'a> SalesforceRequest for SObjectUpdateRequest<'a> {
+impl<'a, T> SalesforceRequest for SObjectUpdateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
     type ReturnValue = ();
 
     fn get_body(&self) -> Option<Value> {
@@ -120,7 +160,7 @@ impl<'a> SalesforceRequest for SObjectUpdateRequest<'a> {
     fn get_url(&self) -> String {
         format!(
             "sobjects/{}/{}",
-            self.sobject.sobject_type.get_api_name(),
+            self.sobject.get_api_name(),
             self.sobject.get_id().unwrap() // Cannot panic due to implementation of `new()`
         )
     }
@@ -139,20 +179,26 @@ impl<'a> SalesforceRequest for SObjectUpdateRequest<'a> {
     }
 }
 
-impl<'a> CompositeFriendlyRequest for SObjectUpdateRequest<'a> {}
+impl<'a, T> CompositeFriendlyRequest for SObjectUpdateRequest<'a, T> where T: SObjectRepresentation {}
 
 // SObject Upsert Requests
 // TODO: note unique return semantics at
 // https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/resources_composite_sobjects_collections_create.htm
 // There is an API version change around response struct and HTTP code.
-pub struct SObjectUpsertRequest<'a> {
-    sobject: &'a mut SObject,
+pub struct SObjectUpsertRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
+    sobject: &'a mut T,
     external_id: String,
 }
 
-impl<'a> SObjectUpsertRequest<'a> {
-    pub fn new(sobject: &'a mut SObject, external_id: &str) -> Result<SObjectUpsertRequest<'a>> {
-        if sobject
+impl<'a, T> SObjectUpsertRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
+    pub fn new(sobject: &'a mut T, external_id: &str) -> Result<SObjectUpsertRequest<'a, T>> {
+        /*if sobject
             .sobject_type
             .get_describe()
             .get_field(external_id)
@@ -171,16 +217,19 @@ impl<'a> SObjectUpsertRequest<'a> {
                 "Cannot upsert without a field value."
             ))
             .into());
-        } else {
-            Ok(SObjectUpsertRequest {
-                sobject,
-                external_id: external_id.to_owned(),
-            })
-        }
+        } else {*/
+        Ok(SObjectUpsertRequest {
+            sobject,
+            external_id: external_id.to_owned(),
+        })
+        //}
     }
 }
 
-impl<'a> SalesforceRequest for SObjectUpsertRequest<'a> {
+impl<'a, T> SalesforceRequest for SObjectUpsertRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
     type ReturnValue = DmlResult;
 
     fn get_body(&self) -> Option<Value> {
@@ -190,7 +239,7 @@ impl<'a> SalesforceRequest for SObjectUpsertRequest<'a> {
     fn get_url(&self) -> String {
         format!(
             "sobjects/{}/{}/{}",
-            self.sobject.sobject_type.get_api_name(),
+            self.sobject.get_api_name(),
             self.sobject
                 .get(&self.external_id)
                 .unwrap() // will not panic via implementation of `new()`
@@ -212,16 +261,22 @@ impl<'a> SalesforceRequest for SObjectUpsertRequest<'a> {
     }
 }
 
-impl<'a> CompositeFriendlyRequest for SObjectUpsertRequest<'a> {}
+impl<'a, T> CompositeFriendlyRequest for SObjectUpsertRequest<'a, T> where T: SObjectRepresentation {}
 
 // SObject Delete Requests
 
-pub struct SObjectDeleteRequest<'a> {
-    sobject: &'a mut SObject,
+pub struct SObjectDeleteRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
+    sobject: &'a mut T,
 }
 
-impl<'a> SObjectDeleteRequest<'a> {
-    pub fn new(sobject: &'a mut SObject) -> Result<SObjectDeleteRequest> {
+impl<'a, T> SObjectDeleteRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
+    pub fn new(sobject: &'a mut T) -> Result<SObjectDeleteRequest<T>> {
         if let Some(_) = sobject.get_id() {
             Ok(SObjectDeleteRequest { sobject })
         } else {
@@ -230,13 +285,16 @@ impl<'a> SObjectDeleteRequest<'a> {
     }
 }
 
-impl<'a> SalesforceRequest for SObjectDeleteRequest<'a> {
+impl<'a, T> SalesforceRequest for SObjectDeleteRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
     type ReturnValue = ();
 
     fn get_url(&self) -> String {
         format!(
             "sobjects/{}/{}",
-            self.sobject.sobject_type.get_api_name(),
+            self.sobject.get_api_name(),
             self.sobject.get_id().unwrap()
         )
     }
@@ -255,27 +313,38 @@ impl<'a> SalesforceRequest for SObjectDeleteRequest<'a> {
     }
 }
 
-impl<'a> CompositeFriendlyRequest for SObjectDeleteRequest<'a> {}
+impl<'a, T> CompositeFriendlyRequest for SObjectDeleteRequest<'a, T> where T: SObjectRepresentation {}
 
 // SObject Retrieve Requests
 
-pub struct SObjectRetrieveRequest {
+pub struct SObjectRetrieveRequest<T>
+where
+    T: SObjectRepresentation,
+{
     id: SalesforceId,
     sobject_type: SObjectType,
+    phantom: PhantomData<T>,
 }
 
-impl SObjectRetrieveRequest {
-    pub fn new(id: SalesforceId, sobject_type: &SObjectType) -> SObjectRetrieveRequest {
+impl<T> SObjectRetrieveRequest<T>
+where
+    T: SObjectRepresentation,
+{
+    pub fn new(id: SalesforceId, sobject_type: &SObjectType) -> SObjectRetrieveRequest<T> {
         SObjectRetrieveRequest {
             id,
             sobject_type: sobject_type.clone(),
+            phantom: PhantomData,
         }
     }
 }
 
 // TODO: support optional Fields query parameter
-impl SalesforceRequest for SObjectRetrieveRequest {
-    type ReturnValue = SObject;
+impl<T> SalesforceRequest for SObjectRetrieveRequest<T>
+where
+    T: SObjectRepresentation,
+{
+    type ReturnValue = T;
 
     fn get_url(&self) -> String {
         format!("sobjects/{}/{}/", self.sobject_type.get_api_name(), self.id)
@@ -287,11 +356,11 @@ impl SalesforceRequest for SObjectRetrieveRequest {
 
     fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
         if let Some(body) = body {
-            Ok(SObject::from_json(body, &self.sobject_type)?)
+            Ok(T::from_json(body, &self.sobject_type)?)
         } else {
             Err(SalesforceError::ResponseBodyExpected.into())
         }
     }
 }
 
-impl CompositeFriendlyRequest for SObjectRetrieveRequest {}
+impl<T> CompositeFriendlyRequest for SObjectRetrieveRequest<T> where T: SObjectRepresentation {}

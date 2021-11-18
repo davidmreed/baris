@@ -1,6 +1,9 @@
+use std::marker::PhantomData;
+
 use crate::{
     api::{CompositeFriendlyRequest, SalesforceRequest},
-    Connection, SObject, SObjectType, SalesforceError, SalesforceId,
+    data::SObjectRepresentation,
+    Connection, SObjectType, SalesforceError, SalesforceId,
 };
 
 use anyhow::Result;
@@ -26,7 +29,10 @@ pub trait SObjectCollection {
 }
 
 #[async_trait]
-impl SObjectCollection for Vec<T> where T: SObject {
+impl<T> SObjectCollection for Vec<T>
+where
+    T: SObjectRepresentation,
+{
     async fn create(&mut self, conn: Connection, all_or_none: bool) -> Result<Vec<Result<()>>> {
         let request = SObjectCollectionCreateRequest::new(self, all_or_none)?;
 
@@ -37,7 +43,7 @@ impl SObjectCollection for Vec<T> where T: SObject {
             .enumerate()
             .map(|(i, r)| {
                 if r.success {
-                    self.get_mut(i).unwrap().set_id(r.id.unwrap());
+                    self.get_mut(i).unwrap().set_id(r.id);
                 }
 
                 r.into()
@@ -72,13 +78,19 @@ impl SObjectCollection for Vec<T> where T: SObject {
 
 // Requests
 
-pub struct SObjectCollectionCreateRequest<'a> {
-    objects: &'a mut Vec<SObject>,
+pub struct SObjectCollectionCreateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
+    objects: &'a mut Vec<T>,
     all_or_none: bool,
 }
 
-impl<'a> SObjectCollectionCreateRequest<'a> {
-    pub fn new(objects: &'a mut Vec<SObject>, all_or_none: bool) -> Result<Self> {
+impl<'a, T> SObjectCollectionCreateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
+    pub fn new(objects: &'a mut Vec<T>, all_or_none: bool) -> Result<Self> {
         if !objects.iter().all(|s| s.get_id().is_none()) {
             return Err(SalesforceError::RecordExistsError.into());
         }
@@ -94,13 +106,16 @@ impl<'a> SObjectCollectionCreateRequest<'a> {
     }
 }
 
-impl<'a> SalesforceRequest for SObjectCollectionCreateRequest<'a> {
+impl<'a, T> SalesforceRequest for SObjectCollectionCreateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
     type ReturnValue = Vec<DmlResultWithId>;
 
     fn get_body(&self) -> Option<Value> {
         Some(json! ({
             "allOrNone": self.all_or_none,
-            "records": self.objects.iter().map(|s| s.to_json_with_type()).collect::<Vec<Value>>()
+            "records": self.objects.iter().map(|s| ensure_type(s, s.to_value())).collect::<Vec<Value>>()
         }))
     }
 
@@ -125,26 +140,40 @@ impl<'a> SalesforceRequest for SObjectCollectionCreateRequest<'a> {
     }
 }
 
-impl<'a> CompositeFriendlyRequest for SObjectCollectionCreateRequest<'a> {}
+impl<'a, T> CompositeFriendlyRequest for SObjectCollectionCreateRequest<'a, T> where
+    T: SObjectRepresentation
+{
+}
 
-pub struct SObjectCollectionRetrieveRequest {
+pub struct SObjectCollectionRetrieveRequest<T>
+where
+    T: SObjectRepresentation,
+{
     sobject_type: SObjectType,
     ids: Vec<SalesforceId>,
     fields: Vec<String>,
+    phantom: PhantomData<T>,
 }
 
-impl SObjectCollectionRetrieveRequest {
+impl<T> SObjectCollectionRetrieveRequest<T>
+where
+    T: SObjectRepresentation,
+{
     pub fn new(sobject_type: &SObjectType, ids: Vec<SalesforceId>, fields: Vec<String>) -> Self {
         SObjectCollectionRetrieveRequest {
             sobject_type: sobject_type.clone(),
             ids,
             fields,
+            phantom: PhantomData,
         }
     }
 }
 
-impl SalesforceRequest for SObjectCollectionRetrieveRequest {
-    type ReturnValue = Vec<Option<SObject>>;
+impl<T> SalesforceRequest for SObjectCollectionRetrieveRequest<T>
+where
+    T: SObjectRepresentation,
+{
+    type ReturnValue = Vec<Option<T>>;
 
     fn get_body(&self) -> Option<Value> {
         Some(json! ({
@@ -170,7 +199,7 @@ impl SalesforceRequest for SObjectCollectionRetrieveRequest {
                     .iter()
                     .map(|sobj| {
                         if let Value::Object(_) = sobj {
-                            SObject::from_json(sobj, &self.sobject_type).ok()
+                            T::from_json(sobj, &self.sobject_type).ok()
                         } else {
                             None
                         }
@@ -185,15 +214,24 @@ impl SalesforceRequest for SObjectCollectionRetrieveRequest {
     }
 }
 
-impl CompositeFriendlyRequest for SObjectCollectionRetrieveRequest {}
+impl<T> CompositeFriendlyRequest for SObjectCollectionRetrieveRequest<T> where
+    T: SObjectRepresentation
+{
+}
 
-pub struct SObjectCollectionUpdateRequest<T, 'a> where T: SObject {
+pub struct SObjectCollectionUpdateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
     objects: &'a mut Vec<T>,
     all_or_none: bool,
 }
 
-impl<'a> SObjectCollectionUpdateRequest<'a> {
-    pub fn new(objects: &'a mut Vec<SObject>, all_or_none: bool) -> Result<Self> {
+impl<'a, T> SObjectCollectionUpdateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
+    pub fn new(objects: &'a mut Vec<T>, all_or_none: bool) -> Result<Self> {
         if !objects.iter().all(|s| s.get_id().is_some()) {
             return Err(SalesforceError::RecordDoesNotExistError.into());
         }
@@ -209,7 +247,10 @@ impl<'a> SObjectCollectionUpdateRequest<'a> {
     }
 }
 
-impl<'a> SalesforceRequest for SObjectCollectionUpdateRequest<'a> {
+impl<'a, T> SalesforceRequest for SObjectCollectionUpdateRequest<'a, T>
+where
+    T: SObjectRepresentation,
+{
     type ReturnValue = Vec<DmlResultWithId>;
 
     fn get_body(&self) -> Option<Value> {
@@ -240,4 +281,7 @@ impl<'a> SalesforceRequest for SObjectCollectionUpdateRequest<'a> {
     }
 }
 
-impl<'a> CompositeFriendlyRequest for SObjectCollectionUpdateRequest<'a> {}
+impl<'a, T> CompositeFriendlyRequest for SObjectCollectionUpdateRequest<'a, T> where
+    T: SObjectRepresentation
+{
+}

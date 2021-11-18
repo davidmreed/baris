@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Error, Result};
 use chrono::{FixedOffset, Utc};
 use serde_derive::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::rest::describe::SObjectDescribe;
 use crate::Connection;
@@ -217,24 +217,38 @@ impl FieldValue {
     }
 }
 
-trait SObject: SObjectCreation + SObjectSerialization {
+pub trait SObjectRepresentation:
+    SObjectCreation + SObjectSerialization + Send + Sync + Sized
+{
     fn get_id(&self) -> Option<SalesforceId>;
-    fn set_id(&self, Option<SalesforceId>);
+    fn set_id(&mut self, id: Option<SalesforceId>);
+    fn get_api_name(&self) -> &str;
 }
 
-trait SObjectCreation {
-    fn from_value(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<SObject>;
+pub trait SObjectCreation
+where
+    Self: Sized,
+{
+    fn from_value(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<Self>;
 }
 
-impl SObjectCreation for T
-    where T: Deserialize {
-    fn from_value(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<SObject> {
+pub trait SObjectSerialization {
+    fn to_value(&self) -> Result<Value>;
+}
+
+impl<'a, T> SObjectCreation for T
+where
+    T: serde::Deserialize<'a>,
+{
+    fn from_value(value: &serde_json::Value, _sobjecttype: &SObjectType) -> Result<Self> {
         Ok(serde_json::from_value::<Self>(value)?)
     }
 }
 
-impl SObjectSerialization for T
-    where T: Serialize {
+impl<T> SObjectSerialization for T
+where
+    T: serde::Serialize,
+{
     fn to_value(&self) -> Result<Value> {
         Ok(serde_json::to_value(self)?)
     }
@@ -244,6 +258,64 @@ impl SObjectSerialization for T
 pub struct SObject {
     pub sobject_type: SObjectType,
     pub fields: HashMap<String, FieldValue>,
+}
+
+impl SObjectRepresentation for SObject {
+    fn get_id(&self) -> Option<SalesforceId> {
+        if let Some(FieldValue::Id(id)) = self.get("id") {
+            Some(id.clone()) // TODO: does this need to clone?
+        } else {
+            None
+        }
+    }
+
+    fn set_id(&mut self, id: Option<SalesforceId>) {
+        if let Some(id) = id {
+            self.put("id", FieldValue::Id(id));
+        } else {
+            self.put("id", FieldValue::Null);
+        }
+    }
+
+    fn get_api_name(&self) -> &str {
+        &self.sobject_type.api_name
+    }
+}
+
+impl SObjectSerialization for SObject {
+    fn to_value(&self) -> Result<serde_json::Value> {
+        let mut map = serde_json::Map::new();
+
+        for (k, v) in self.fields.iter() {
+            map.insert(k.to_string(), v.into());
+        }
+
+        Ok(serde_json::Value::Object(map))
+    }
+}
+
+impl SObjectCreation for SObject {
+    fn from_value(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<SObject> {
+        if let serde_json::Value::Object(content) = value {
+            let mut ret = SObject::new(sobjecttype);
+            for k in content.keys() {
+                // Get the describe for this field.
+                if k != "attributes" {
+                    let describe = sobjecttype.get_describe().get_field(k).unwrap();
+
+                    ret.put(
+                        &k.to_lowercase(),
+                        FieldValue::from_json(value.get(k).unwrap(), describe.soap_type)?,
+                    );
+                }
+            }
+            Ok(ret)
+        } else {
+            Err(Error::new(SalesforceError::GeneralError(
+                "Invalid record JSON".to_string(),
+            )))
+        }
+    }
 }
 
 impl SObject {
@@ -268,18 +340,6 @@ impl SObject {
         self.fields.insert(key.to_lowercase(), val);
     }
 
-    pub fn get_id(&self) -> Option<&SalesforceId> {
-        if let Some(FieldValue::Id(id)) = self.get("id") {
-            Some(id)
-        } else {
-            None
-        }
-    }
-
-    pub fn set_id(&mut self, id: SalesforceId) {
-        self.put("id", FieldValue::Id(id));
-    }
-
     pub(crate) fn from_csv(
         rec: &HashMap<String, String>,
         sobjecttype: &SObjectType,
@@ -299,70 +359,6 @@ impl SObject {
         }
 
         Ok(ret)
-    }
-
-    pub async fn from_json_with_type(
-        conn: &mut Connection,
-        value: &serde_json::Value,
-    ) -> Result<SObject> {
-        // TODO: clean up this method.
-        if let serde_json::Value::Object(content) = value {
-            let attributes = content.get("attributes").unwrap();
-            if let serde_json::Value::Object(attrib) = attributes {
-                let sobject_type = conn
-                    .get_type(attrib.get("type").unwrap().as_str().unwrap())
-                    .await?;
-
-                return SObject::from_json(value, &sobject_type);
-            }
-        }
-
-        Err(SalesforceError::UnknownError.into())
-    }
-
-    pub fn from_json(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<SObject> {
-        if let serde_json::Value::Object(content) = value {
-            let mut ret = SObject::new(sobjecttype);
-            for k in content.keys() {
-                // Get the describe for this field.
-                if k != "attributes" {
-                    let describe = sobjecttype.get_describe().get_field(k).unwrap();
-
-                    ret.put(
-                        &k.to_lowercase(),
-                        FieldValue::from_json(value.get(k).unwrap(), describe.soap_type)?,
-                    );
-                }
-            }
-            Ok(ret)
-        } else {
-            Err(Error::new(SalesforceError::GeneralError(
-                "Invalid record JSON".to_string(),
-            )))
-        }
-    }
-
-    pub(crate) fn to_json(&self) -> serde_json::Value {
-        let mut map = serde_json::Map::new();
-
-        for (k, v) in self.fields.iter() {
-            map.insert(k.to_string(), v.into());
-        }
-
-        serde_json::Value::Object(map)
-    }
-
-    // TODO: clean up these three methods
-    pub(crate) fn to_json_without_id(&self) -> serde_json::Value {
-        let mut map = serde_json::Map::new();
-
-        for (k, v) in self.fields.iter() {
-            if k != "id" {
-                map.insert(k.to_string(), v.into());
-            }
-        }
-
-        serde_json::Value::Object(map)
     }
 
     pub(crate) fn to_json_with_type(&self) -> serde_json::Value {
@@ -434,6 +430,7 @@ impl FieldValue {
         if let serde_json::Value::Null = value {
             return Ok(FieldValue::Null);
         }
+
         match soap_type {
             SoapType::Address | SoapType::Any | SoapType::Blob => panic!("Not supported"),
             SoapType::Boolean => {
@@ -443,7 +440,6 @@ impl FieldValue {
             }
             SoapType::Date => {
                 if let serde_json::Value::String(b) = value {
-                    // TODO: this returns a DateTime<FixedOffset> - issue?
                     return Ok(FieldValue::Date(Date::parse_from_str(b, DATE_FORMAT)?));
                 }
             }
