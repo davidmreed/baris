@@ -254,9 +254,70 @@ impl SObject {
         }
     }
 
-    // TODO: similar methods for each data type.
-    pub fn with_string(mut self, key: &str, value: &str) -> SObject {
+    pub fn with_address(mut self, key: &str, value: Address) -> SObject {
+        self.put(key, FieldValue::Address(value));
+        self
+    }
+
+    pub fn with_int(mut self, key: &str, value: i64) -> SObject {
+        self.put(key, FieldValue::Integer(value));
+        self
+    }
+
+    pub fn with_double(mut self, key: &str, value: f64) -> SObject {
+        self.put(key, FieldValue::Double(value));
+        self
+    }
+
+    pub fn with_boolean(mut self, key: &str, value: bool) -> SObject {
+        self.put(key, FieldValue::Boolean(value));
+        self
+    }
+
+    pub fn with_str(mut self, key: &str, value: &str) -> SObject {
         self.put(key, FieldValue::String(value.to_owned()));
+        self
+    }
+
+    pub fn with_string(mut self, key: &str, value: String) -> SObject {
+        self.put(key, FieldValue::String(value));
+        self
+    }
+
+    pub fn with_str(mut self, key: &str, value: &str) -> SObject {
+        self.put(key, FieldValue::String(value.to_owned()));
+        self
+    }
+
+    pub fn with_datetime(mut self, key: &str, value: DateTime) -> SObject {
+        self.put(key, FieldValue::DateTime(value));
+        self
+    }
+
+    pub fn with_time(mut self, key: &str, value: Time) -> SObject {
+        self.put(key, FieldValue::Time(value));
+        self
+    }
+
+    pub fn with_date(mut self, key: &str, value: Date) -> SObject {
+        self.put(key, FieldValue::Date(value));
+        self
+    }
+    
+    pub fn with_reference(mut self, key: &str, value: SalesforceId) -> SObject {
+        self.put(key, Id::DateTime(value));
+        self
+    }
+
+    pub fn with_relationship(mut self, key: &str, value: SObject) -> SObject {
+        self.put(key, FieldValue::Relationship(value));
+        self
+    }
+
+    // TODO: Blob
+
+    pub fn with_null(mut self, key: &str) -> SObject {
+        self.put(key, FieldValue::Null);
         self
     }
 
