@@ -217,6 +217,29 @@ impl FieldValue {
     }
 }
 
+trait SObject: SObjectCreation + SObjectSerialization {
+    fn get_id(&self) -> Option<SalesforceId>;
+    fn set_id(&self, Option<SalesforceId>);
+}
+
+trait SObjectCreation {
+    fn from_value(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<SObject>;
+}
+
+impl SObjectCreation for T
+    where T: Deserialize {
+    fn from_value(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<SObject> {
+        Ok(serde_json::from_value::<Self>(value)?)
+    }
+}
+
+impl SObjectSerialization for T
+    where T: Serialize {
+    fn to_value(&self) -> Result<Value> {
+        Ok(serde_json::to_value(self)?)
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct SObject {
     pub sobject_type: SObjectType,

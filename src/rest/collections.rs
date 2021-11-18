@@ -26,7 +26,7 @@ pub trait SObjectCollection {
 }
 
 #[async_trait]
-impl SObjectCollection for Vec<SObject> {
+impl SObjectCollection for Vec<T> where T: SObject {
     async fn create(&mut self, conn: Connection, all_or_none: bool) -> Result<Vec<Result<()>>> {
         let request = SObjectCollectionCreateRequest::new(self, all_or_none)?;
 
@@ -187,8 +187,8 @@ impl SalesforceRequest for SObjectCollectionRetrieveRequest {
 
 impl CompositeFriendlyRequest for SObjectCollectionRetrieveRequest {}
 
-pub struct SObjectCollectionUpdateRequest<'a> {
-    objects: &'a mut Vec<SObject>,
+pub struct SObjectCollectionUpdateRequest<T, 'a> where T: SObject {
+    objects: &'a mut Vec<T>,
     all_or_none: bool,
 }
 
