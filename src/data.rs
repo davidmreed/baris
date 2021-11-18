@@ -274,11 +274,6 @@ impl SObject {
         self
     }
 
-    pub fn with_str(mut self, key: &str, value: &str) -> SObject {
-        self.put(key, FieldValue::String(value.to_owned()));
-        self
-    }
-
     pub fn with_string(mut self, key: &str, value: String) -> SObject {
         self.put(key, FieldValue::String(value));
         self

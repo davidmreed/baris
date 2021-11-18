@@ -64,7 +64,7 @@ async fn test_individual_sobjects() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_collections() -> Result<()> {
+async fn test_collections_parallel() -> Result<()> {
     let mut conn = get_test_connection()?;
     let account_type = conn.get_type("Account").await?;
 
