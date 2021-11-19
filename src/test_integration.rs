@@ -64,12 +64,12 @@ async fn test_individual_sobjects() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_collections() -> Result<()> {
+async fn test_collections_parallel() -> Result<()> {
     let mut conn = get_test_connection()?;
     let account_type = conn.get_type("Account").await?;
 
     let mut sobject_chunks: Vec<Vec<SObject>> = (0..1000)
-        .map(|i| SObject::new(&account_type).with_string("Name", &format!("Account {}", i)))
+        .map(|i| SObject::new(&account_type).with_string("Name", format!("Account {}", i)))
         .chunks(200)
         .into_iter()
         .map(|v| v.collect::<Vec<SObject>>())
