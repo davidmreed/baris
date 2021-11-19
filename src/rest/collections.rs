@@ -112,10 +112,11 @@ where
 {
     type ReturnValue = Vec<DmlResultWithId>;
 
+    // TODO: this should return a Result<Option<Value>>
     fn get_body(&self) -> Option<Value> {
         Some(json! ({
             "allOrNone": self.all_or_none,
-            "records": self.objects.iter().map(|s| ensure_type(s, s.to_value())).collect::<Vec<Value>>()
+            "records": self.objects.iter().map(|s| s.to_value_with_options(true, false)).collect::<Result<Vec<Value>>>().ok()
         }))
     }
 
@@ -199,7 +200,7 @@ where
                     .iter()
                     .map(|sobj| {
                         if let Value::Object(_) = sobj {
-                            T::from_json(sobj, &self.sobject_type).ok()
+                            T::from_value(sobj, &self.sobject_type).ok()
                         } else {
                             None
                         }
@@ -256,7 +257,7 @@ where
     fn get_body(&self) -> Option<Value> {
         Some(json! ({
             "allOrNone": self.all_or_none,
-            "records": self.objects.iter().map(|s| s.to_json_with_type()).collect::<Vec<Value>>()
+            "records": self.objects.iter().map(|s| s.to_value_with_options(true, false)).collect::<Result<Vec<Value>>>().ok()
         }))
     }
 

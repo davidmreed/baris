@@ -9,6 +9,7 @@ use tokio_stream::StreamExt;
 
 use crate::{
     api::SalesforceRequest,
+    data::SObjectCreation,
     streams::{BufferedLocatorManager, BufferedLocatorStream, BufferedLocatorStreamState},
     Connection, SObject, SObjectType, SalesforceError,
 };
@@ -112,7 +113,7 @@ impl QueryResult {
         Ok(BufferedLocatorStreamState::new(
             self.records
                 .iter()
-                .map(|r| SObject::from_json(r, sobject_type))
+                .map(|r| SObject::from_value(r, sobject_type))
                 .collect::<Result<VecDeque<SObject>>>()?,
             self.next_records_url,
             Some(self.total_size),

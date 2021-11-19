@@ -4,6 +4,8 @@ use itertools::Itertools;
 use reqwest::Url;
 use std::env;
 
+use crate::data::SObjectRepresentation;
+use crate::rest::rows::SObjectDML;
 use crate::{
     auth::AccessTokenAuth, rest::collections::SObjectCollection, Connection, FieldValue, SObject,
 };

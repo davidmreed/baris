@@ -10,7 +10,6 @@ use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::rest::describe::SObjectDescribe;
-use crate::Connection;
 
 use super::errors::SalesforceError;
 
@@ -234,23 +233,46 @@ where
 
 pub trait SObjectSerialization {
     fn to_value(&self) -> Result<Value>;
+    fn to_value_with_options(&self, include_type: bool, include_id: bool) -> Result<Value>;
 }
 
 impl<'a, T> SObjectCreation for T
 where
-    T: serde::Deserialize<'a>,
+    T: for<'de> serde::Deserialize<'de>,
 {
     fn from_value(value: &serde_json::Value, _sobjecttype: &SObjectType) -> Result<Self> {
-        Ok(serde_json::from_value::<Self>(value)?)
+        Ok(serde_json::from_value::<Self>(value.clone())?) // TODO: make this not clone.
     }
 }
 
 impl<T> SObjectSerialization for T
 where
-    T: serde::Serialize,
+    T: serde::Serialize + SObjectRepresentation,
 {
     fn to_value(&self) -> Result<Value> {
         Ok(serde_json::to_value(self)?)
+    }
+
+    fn to_value_with_options(&self, include_type: bool, include_id: bool) -> Result<Value> {
+        let mut value = self.to_value()?;
+
+        if let Value::Object(ref mut map) = value {
+            if include_type {
+                map.insert(
+                    "attributes".to_string(),
+                    json!({"type": self.get_api_name() }),
+                );
+            }
+            if include_id && self.get_id().is_some() {
+                map.insert(
+                    "id".to_string(),
+                    Value::String(self.get_id().unwrap().to_string()),
+                );
+            }
+            Ok(value)
+        } else {
+            Err(SalesforceError::UnknownError.into())
+        }
     }
 }
 
@@ -291,6 +313,28 @@ impl SObjectSerialization for SObject {
         }
 
         Ok(serde_json::Value::Object(map))
+    }
+
+    fn to_value_with_options(&self, include_type: bool, include_id: bool) -> Result<Value> {
+        let mut value = self.to_value()?;
+
+        if let Value::Object(ref mut map) = value {
+            if include_type {
+                map.insert(
+                    "attributes".to_string(),
+                    json!({"type": self.get_api_name() }),
+                );
+            }
+            if include_id && self.get_id().is_some() {
+                map.insert(
+                    "id".to_string(),
+                    Value::String(self.get_id().unwrap().to_string()),
+                );
+            }
+            Ok(value)
+        } else {
+            Err(SalesforceError::UnknownError.into())
+        }
     }
 }
 
@@ -415,21 +459,6 @@ impl SObject {
         }
 
         Ok(ret)
-    }
-
-    pub(crate) fn to_json_with_type(&self) -> serde_json::Value {
-        let mut map = serde_json::Map::new();
-
-        for (k, v) in self.fields.iter() {
-            map.insert(k.to_string(), v.into());
-        }
-
-        map.insert(
-            "attributes".to_string(),
-            json!({"type": self.sobject_type.get_api_name() }),
-        );
-
-        serde_json::Value::Object(map)
     }
 }
 

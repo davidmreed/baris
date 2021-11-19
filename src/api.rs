@@ -4,7 +4,6 @@ extern crate serde_derive;
 extern crate serde_json;
 
 use std::collections::HashMap;
-use std::mem;
 use std::ops::Deref;
 use std::sync::Arc;
 

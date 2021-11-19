@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::api::CompositeFriendlyRequest;
 use crate::api::SalesforceRequest;
 use crate::data::SObjectRepresentation;
-use crate::{Connection, FieldValue, SObject, SObjectType, SalesforceError, SalesforceId};
+use crate::{Connection, SObjectType, SalesforceError, SalesforceId};
 
 use super::DmlError;
 use super::{DmlResult, DmlResultWithId};
@@ -103,7 +103,7 @@ where
     type ReturnValue = DmlResultWithId;
 
     fn get_body(&self) -> Option<Value> {
-        Some(self.sobject.to_json())
+        self.sobject.to_value().ok()
     }
 
     fn get_url(&self) -> String {
@@ -154,7 +154,7 @@ where
     type ReturnValue = ();
 
     fn get_body(&self) -> Option<Value> {
-        Some(self.sobject.to_json_without_id()) // FIXME: including the Id is probably what's causing the 400 here.
+        self.sobject.to_value_with_options(false, false).ok()
     }
 
     fn get_url(&self) -> String {
@@ -191,6 +191,7 @@ where
 {
     sobject: &'a mut T,
     external_id: String,
+    external_id_value: String,
 }
 
 impl<'a, T> SObjectUpsertRequest<'a, T>
@@ -198,31 +199,24 @@ where
     T: SObjectRepresentation,
 {
     pub fn new(sobject: &'a mut T, external_id: &str) -> Result<SObjectUpsertRequest<'a, T>> {
-        /*if sobject
-            .sobject_type
-            .get_describe()
-            .get_field(external_id)
-            .is_none()
-        {
-            return Err(SalesforceError::SchemaError(format!(
-                "Field {} does not exist.",
-                external_id
-            ))
-            .into());
+        let s = sobject.to_value()?;
+        if let Value::Object(map) = s {
+            let field_value = map.get(external_id);
+            if field_value.is_none() {
+                Err(
+                    SalesforceError::GeneralError(format!("Cannot upsert without a field value."))
+                        .into(),
+                )
+            } else {
+                Ok(SObjectUpsertRequest {
+                    sobject,
+                    external_id: external_id.to_owned(),
+                    external_id_value: field_value.unwrap().to_string(), // TODO: does this yield the correct value for all ExtId-capable types?
+                })
+            }
+        } else {
+            Err(SalesforceError::UnknownError.into())
         }
-
-        let field_value = sobject.get(external_id);
-        if field_value.is_none() {
-            return Err(SalesforceError::GeneralError(format!(
-                "Cannot upsert without a field value."
-            ))
-            .into());
-        } else {*/
-        Ok(SObjectUpsertRequest {
-            sobject,
-            external_id: external_id.to_owned(),
-        })
-        //}
     }
 }
 
@@ -233,18 +227,15 @@ where
     type ReturnValue = DmlResult;
 
     fn get_body(&self) -> Option<Value> {
-        Some(self.sobject.to_json())
+        self.sobject.to_value().ok()
     }
 
     fn get_url(&self) -> String {
         format!(
             "sobjects/{}/{}/{}",
             self.sobject.get_api_name(),
-            self.sobject
-                .get(&self.external_id)
-                .unwrap() // will not panic via implementation of `new()`
-                .as_string(),
-            self.external_id
+            self.external_id,
+            self.external_id_value
         )
     }
 
@@ -356,7 +347,7 @@ where
 
     fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
         if let Some(body) = body {
-            Ok(T::from_json(body, &self.sobject_type)?)
+            Ok(T::from_value(body, &self.sobject_type)?)
         } else {
             Err(SalesforceError::ResponseBodyExpected.into())
         }
