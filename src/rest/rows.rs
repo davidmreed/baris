@@ -347,6 +347,7 @@ where
 
     fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
         if let Some(body) = body {
+            println!("Result: {:?}", body);
             Ok(T::from_value(body, &self.sobject_type)?)
         } else {
             Err(SalesforceError::ResponseBodyExpected.into())

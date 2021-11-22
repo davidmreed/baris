@@ -24,7 +24,7 @@ fn get_test_connection() -> Result<Connection> {
 }
 
 #[tokio::test]
-async fn test_individual_sobjects() -> Result<()> {
+async fn test_generic_sobject_rows() -> Result<()> {
     let mut conn = get_test_connection()?;
     let account_type = conn.get_type("Account").await?;
 
@@ -37,8 +37,7 @@ async fn test_individual_sobjects() -> Result<()> {
     .await?
     .len();
 
-    let mut account = SObject::new(&account_type);
-    account.put("Name", FieldValue::String("Test".to_owned()));
+    let mut account = SObject::new(&account_type).with_str("Name", "Test");
 
     account.create(&conn).await?;
 

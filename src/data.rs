@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
-use std::fmt;
+use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{Error, Result};
-use chrono::{FixedOffset, Utc};
+use chrono::{FixedOffset, TimeZone, Utc};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -89,9 +89,76 @@ impl fmt::Display for SalesforceId {
     }
 }
 
-pub type DateTime = chrono::DateTime<chrono::Utc>;
-pub type Time = chrono::NaiveTime;
-pub type Date = chrono::NaiveDate;
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(try_from = "&str")]
+pub struct DateTime(chrono::DateTime<chrono::Utc>);
+
+impl DateTime {
+    pub fn new(
+        year: i32,
+        month: u32,
+        day: u32,
+        hours: u32,
+        minutes: u32,
+        seconds: u32,
+        milliseconds: u32,
+    ) -> Result<DateTime> {
+        Ok(DateTime {
+            0: chrono::Utc
+                .ymd_opt(year, month, day)
+                .and_hms_milli_opt(hours, minutes, seconds, milliseconds)
+                .single()
+                .ok_or(SalesforceError::DateTimeError)?,
+        })
+    }
+}
+
+impl Deref for DateTime {
+    type Target = chrono::DateTime<chrono::Utc>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for DateTime {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(DateTime {
+            0: chrono::DateTime::parse_from_rfc3339(value)?.with_timezone(&Utc),
+        })
+    }
+}
+
+impl Display for DateTime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.0.to_rfc3339_opts(chrono::SecondsFormat::Millis, false)
+        )
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Time(chrono::NaiveTime);
+
+impl Deref for Time {
+    type Target = chrono::NaiveTime;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Date(chrono::NaiveDate);
+
+impl Deref for Date {
+    type Target = chrono::NaiveDate;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -268,6 +335,11 @@ where
                     "id".to_string(),
                     Value::String(self.get_id().unwrap().to_string()),
                 );
+            } else {
+                // TODO: handle case-insensitivity
+                if map.contains_key("id") {
+                    map.remove("id");
+                }
             }
             Ok(value)
         } else {
@@ -330,6 +402,11 @@ impl SObjectSerialization for SObject {
                     "id".to_string(),
                     Value::String(self.get_id().unwrap().to_string()),
                 );
+            } else {
+                // TODO: handle case-insensitivity
+                if map.contains_key("id") {
+                    map.remove("id");
+                }
             }
             Ok(value)
         } else {
@@ -347,6 +424,7 @@ impl SObjectCreation for SObject {
                 if k != "attributes" {
                     let describe = sobjecttype.get_describe().get_field(k).unwrap();
 
+                    println!("Field: {:?}", k);
                     ret.put(
                         &k.to_lowercase(),
                         FieldValue::from_json(value.get(k).unwrap(), describe.soap_type)?,
@@ -649,6 +727,7 @@ pub enum SoapType {
 #[cfg(test)]
 mod test {
     use super::*;
+    use chrono::TimeZone;
 
     #[test]
     fn test_salesforce_id() {
@@ -671,4 +750,39 @@ mod test {
         assert!(SalesforceId::new("1111111111111111111").is_err());
         assert!(SalesforceId::new("_______________").is_err());
     }
+
+    #[test]
+    fn test_datetimes_serde() {
+        assert!(
+            serde_json::from_str::<DateTime>("2021-11-19T01:51:47.323+0000")
+                == Utc::ymd(2021, 11, 19).and_hms_micro(01, 51, 47, 323_000)
+        );
+        assert!(
+            serde_json::to_string(
+                &DateTime::from_ymd(2021, 11, 15).and_hms_micro(01, 51, 47, 323_000)
+            )
+            .unwrap()
+                == "\"2021-11-19T01:51:47.323+0000\""
+        );
+    }
+
+    #[test]
+    fn test_dates_parse() {
+        assert!(
+            Date::parse_from_str("2021-11-15", DATE_FORMAT).unwrap()
+                == Date::from_ymd(2021, 11, 15)
+        );
+        assert!(Date::from_ymd(2021, 11, 15).format(DATE_FORMAT).to_string() == "2021-11-15");
+    }
+
+    #[test]
+    fn test_dates_serde() {
+        assert!(
+            serde_json::from_str::<Date>("\"2021-11-15\"").unwrap() == Date::from_ymd(2021, 11, 15)
+        );
+        assert!(serde_json::to_string(&Date::from_ymd(2021, 11, 15)).unwrap() == "\"2021-11-15\"");
+    }
+
+    #[test]
+    fn test_times() {}
 }

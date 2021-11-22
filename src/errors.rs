@@ -13,6 +13,7 @@ pub enum SalesforceError {
     ResponseBodyExpected,
     UnknownError,
     NotAuthenticated,
+    DateTimeError,
 }
 
 impl fmt::Display for SalesforceError {
@@ -40,6 +41,9 @@ impl fmt::Display for SalesforceError {
                     f,
                     "Data cannot be obtained until an authorization refresh is executed"
                 )
+            }
+            SalesforceError::DateTimeError => {
+                write!(f, "An date, time, or datetime value could not be created")
             }
         }
     }
