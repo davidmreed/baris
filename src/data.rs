@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::ops::Deref;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Error, Result};
-use chrono::{FixedOffset, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -135,13 +136,30 @@ impl Display for DateTime {
         write!(
             f,
             "{}",
-            self.0.to_rfc3339_opts(chrono::SecondsFormat::Millis, false)
+            self.0.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
         )
+    }
+}
+
+impl FromStr for DateTime {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        s.try_into()
     }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Time(chrono::NaiveTime);
+
+impl Time {
+    pub fn new(hour: u32, min: u32, sec: u32, milli: u32) -> Result<Time> {
+        Ok(Time {
+            0: chrono::NaiveTime::from_hms_milli_opt(hour, min, sec, milli)
+                .ok_or(SalesforceError::DateTimeError)?,
+        })
+    }
+}
 
 impl Deref for Time {
     type Target = chrono::NaiveTime;
@@ -150,13 +168,70 @@ impl Deref for Time {
     }
 }
 
+impl TryFrom<&str> for Time {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(Time {
+            0: chrono::NaiveTime::parse_from_str(value, "%H:%M:%S%.3fZ")?,
+        })
+    }
+}
+
+impl Display for Time {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0.format("%H:%M:%S%.3fZ").to_string())
+    }
+}
+
+impl FromStr for Time {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        s.try_into()
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Date(chrono::NaiveDate);
+
+impl Date {
+    pub fn new(year: i32, month: u32, day: u32) -> Result<Date> {
+        Ok(Date {
+            0: chrono::NaiveDate::from_ymd_opt(year, month, day)
+                .ok_or(SalesforceError::DateTimeError)?,
+        })
+    }
+}
 
 impl Deref for Date {
     type Target = chrono::NaiveDate;
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl TryFrom<&str> for Date {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(Date {
+            0: chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")?,
+        })
+    }
+}
+
+impl Display for Date {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0.format("%Y-%m-%d").to_string())
+    }
+}
+
+impl FromStr for Date {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        s.try_into()
     }
 }
 
@@ -603,20 +678,17 @@ impl FieldValue {
             }
             SoapType::Date => {
                 if let serde_json::Value::String(b) = value {
-                    return Ok(FieldValue::Date(Date::parse_from_str(b, DATE_FORMAT)?));
+                    return Ok(FieldValue::Date(b.parse()?));
                 }
             }
             SoapType::DateTime => {
                 if let serde_json::Value::String(b) = value {
-                    return Ok(FieldValue::DateTime(
-                        chrono::DateTime::<FixedOffset>::parse_from_str(b, DATETIME_FORMAT)?
-                            .with_timezone(&Utc),
-                    ));
+                    return Ok(FieldValue::DateTime(b.parse()?));
                 }
             }
             SoapType::Time => {
                 if let serde_json::Value::String(b) = value {
-                    return Ok(FieldValue::Time(Time::parse_from_str(b, TIME_FORMAT)?));
+                    return Ok(FieldValue::Time(b.parse()?));
                 }
             }
             SoapType::Double => {
@@ -752,35 +824,30 @@ mod test {
     }
 
     #[test]
-    fn test_datetimes_serde() {
+    fn test_datetimes_serde() -> Result<()> {
         assert!(
-            serde_json::from_str::<DateTime>("2021-11-19T01:51:47.323+0000")
-                == Utc::ymd(2021, 11, 19).and_hms_micro(01, 51, 47, 323_000)
+            serde_json::from_str::<DateTime>("2021-11-19T01:51:47.323Z")?
+                == DateTime::new(2021, 11, 19, 01, 51, 47, 323_000)?
         );
         assert!(
-            serde_json::to_string(
-                &DateTime::from_ymd(2021, 11, 15).and_hms_micro(01, 51, 47, 323_000)
-            )
-            .unwrap()
-                == "\"2021-11-19T01:51:47.323+0000\""
+            serde_json::to_string(&DateTime::new(2021, 11, 19, 01, 51, 47, 323_000)?)?
+                == "\"2021-11-19T01:51:47.323Z\""
         );
+        Ok(())
     }
 
     #[test]
-    fn test_dates_parse() {
-        assert!(
-            Date::parse_from_str("2021-11-15", DATE_FORMAT).unwrap()
-                == Date::from_ymd(2021, 11, 15)
-        );
-        assert!(Date::from_ymd(2021, 11, 15).format(DATE_FORMAT).to_string() == "2021-11-15");
+    fn test_dates_parse() -> Result<()> {
+        assert!("2021-11-15".parse::<Date>()? == Date::new(2021, 11, 15)?);
+        assert!(Date::new(2021, 11, 15)?.to_string() == "2021-11-15");
+        Ok(())
     }
 
     #[test]
-    fn test_dates_serde() {
-        assert!(
-            serde_json::from_str::<Date>("\"2021-11-15\"").unwrap() == Date::from_ymd(2021, 11, 15)
-        );
-        assert!(serde_json::to_string(&Date::from_ymd(2021, 11, 15)).unwrap() == "\"2021-11-15\"");
+    fn test_dates_serde() -> Result<()> {
+        assert!(serde_json::from_str::<Date>("\"2021-11-15\"")? == Date::new(2021, 11, 15)?);
+        assert!(serde_json::to_string(&Date::new(2021, 11, 15)?)? == "\"2021-11-15\"");
+        Ok(())
     }
 
     #[test]
