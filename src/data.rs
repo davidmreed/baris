@@ -14,15 +14,6 @@ use crate::rest::describe::SObjectDescribe;
 
 use super::errors::SalesforceError;
 
-// The Salesforce API's required datetime format is mostly RFC 3339,
-// but requires _exactly_ three fractional second digits (millisecond resultion).
-// Using the wrong number of fractional digits can cause incorrect behavior
-// in the Bulk API.
-// See https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/intro_valid_date_formats.htm
-const DATETIME_FORMAT: &str = "%Y-%m-%dT%T.%.3fZ";
-const DATE_FORMAT: &str = "%Y-%m-%d";
-const TIME_FORMAT: &str = "%T.%.3fZ"; // TODO: validate
-
 #[derive(Serialize, Deserialize, Copy, Clone, PartialEq)]
 #[serde(try_from = "String")]
 pub struct SalesforceId {
@@ -627,10 +618,10 @@ impl From<&FieldValue> for serde_json::Value {
             FieldValue::Boolean(i) => serde_json::Value::Bool(*i),
             FieldValue::String(i) => serde_json::Value::String(i.clone()),
             FieldValue::DateTime(i) => {
-                serde_json::Value::String(i.format(DATETIME_FORMAT).to_string())
+                serde_json::Value::String(i.to_string())
             }
-            FieldValue::Time(i) => serde_json::Value::String(i.format(TIME_FORMAT).to_string()),
-            FieldValue::Date(i) => serde_json::Value::String(i.format(DATE_FORMAT).to_string()),
+            FieldValue::Time(i) => serde_json::Value::String(i.to_string()),
+            FieldValue::Date(i) => serde_json::Value::String(i.to_string()),
             FieldValue::Id(i) => serde_json::Value::String(i.to_string()),
             FieldValue::Null => serde_json::Value::Null,
             FieldValue::Address(address) => serde_json::to_value(address).unwrap(), // This should be infallible
@@ -653,9 +644,9 @@ impl FieldValue {
             FieldValue::Double(i) => format!("{}", i),
             FieldValue::Boolean(i) => format!("{}", i),
             FieldValue::String(i) => i.clone(),
-            FieldValue::DateTime(i) => i.format(DATETIME_FORMAT).to_string(),
-            FieldValue::Time(i) => i.format(TIME_FORMAT).to_string(),
-            FieldValue::Date(i) => i.format(DATE_FORMAT).to_string(),
+            FieldValue::DateTime(i) => i.to_string(),
+            FieldValue::Time(i) => i.to_string(),
+            FieldValue::Date(i) => i.to_string(),
             FieldValue::Id(i) => i.to_string(),
             FieldValue::Null => "".to_string(),
             FieldValue::Address(_) => todo!(),
@@ -824,13 +815,20 @@ mod test {
     }
 
     #[test]
+    fn test_datetimes_parse() -> Result<()> {
+        assert!(DateTime::new(2021, 11, 19, 01, 51, 47, 323)?.to_string() == "2021-11-19T01:51:47.323Z");
+        assert!("2021-11-19T01:51:47.323Z".parse::<DateTime>()? == DateTime::new(2021, 11, 19, 01, 51, 47, 323)?);
+        Ok(())
+    }
+
+    #[test]
     fn test_datetimes_serde() -> Result<()> {
         assert!(
-            serde_json::from_str::<DateTime>("2021-11-19T01:51:47.323Z")?
-                == DateTime::new(2021, 11, 19, 01, 51, 47, 323_000)?
+            serde_json::from_str::<DateTime>("\"2021-11-19T01:51:47.323Z\"")?
+                == DateTime::new(2021, 11, 19, 01, 51, 47, 323)?
         );
         assert!(
-            serde_json::to_string(&DateTime::new(2021, 11, 19, 01, 51, 47, 323_000)?)?
+            serde_json::to_string(&DateTime::new(2021, 11, 19, 01, 51, 47, 323)?)?
                 == "\"2021-11-19T01:51:47.323Z\""
         );
         Ok(())
