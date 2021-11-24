@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     future::Future,
     mem,
     pin::Pin,
@@ -7,32 +7,53 @@ use std::{
 };
 
 use anyhow::{Error, Result};
+use serde_json::{Map, Value};
 use tokio::task::JoinHandle;
 use tokio_stream::Stream;
 
-use crate::SObject;
+use crate::{data::SObjectRepresentation, FieldValue, SObjectType};
 
-pub(crate) trait BufferedLocatorManager {
-    fn get_next_future(
-        &mut self,
-        state: Option<BufferedLocatorStreamState>,
-    ) -> JoinHandle<Result<BufferedLocatorStreamState>>;
+pub fn value_from_csv(rec: &HashMap<String, String>, sobjecttype: &SObjectType) -> Result<Value> {
+    let mut ret = Map::new();
+
+    for k in rec.keys() {
+        // Get the describe for this field.
+        if k != "attributes" {
+            let describe = sobjecttype.get_describe().get_field(k).unwrap();
+            let f = &FieldValue::from_str(rec.get(k).unwrap(), &describe.soap_type)?;
+            ret.insert(k.to_lowercase(), f.into());
+        }
+    }
+
+    Ok(Value::Object(ret))
 }
 
-pub(crate) struct BufferedLocatorStreamState {
-    pub buffer: VecDeque<SObject>, // TODO: we should decouple the buffer from the locator state to enable prefetching
+pub(crate) trait BufferedLocatorManager: Send + Sync {
+    type Output: SObjectRepresentation;
+
+    fn get_next_future(
+        &mut self,
+        state: Option<BufferedLocatorStreamState<Self::Output>>,
+    ) -> JoinHandle<Result<BufferedLocatorStreamState<Self::Output>>>;
+}
+
+pub(crate) struct BufferedLocatorStreamState<T: SObjectRepresentation> {
+    pub buffer: VecDeque<T>, // TODO: we should decouple the buffer from the locator state to enable prefetching
     pub locator: Option<String>,
     pub total_size: Option<usize>,
     pub done: bool,
 }
 
-impl BufferedLocatorStreamState {
+impl<T> BufferedLocatorStreamState<T>
+where
+    T: SObjectRepresentation,
+{
     pub fn new(
-        buffer: VecDeque<SObject>,
+        buffer: VecDeque<T>,
         locator: Option<String>,
         total_size: Option<usize>,
         done: bool,
-    ) -> BufferedLocatorStreamState {
+    ) -> BufferedLocatorStreamState<T> {
         BufferedLocatorStreamState {
             buffer,
             locator,
@@ -42,18 +63,21 @@ impl BufferedLocatorStreamState {
     }
 }
 
-pub struct BufferedLocatorStream {
-    manager: Box<dyn BufferedLocatorManager>,
-    state: Option<BufferedLocatorStreamState>,
+pub struct BufferedLocatorStream<T: SObjectRepresentation + Unpin> {
+    manager: Box<dyn BufferedLocatorManager<Output = T>>,
+    state: Option<BufferedLocatorStreamState<T>>,
     yielded: usize,
     error: Option<Error>, // TODO
-    retrieve_task: Option<JoinHandle<Result<BufferedLocatorStreamState>>>,
+    retrieve_task: Option<JoinHandle<Result<BufferedLocatorStreamState<T>>>>,
 }
 
-impl BufferedLocatorStream {
+impl<T> BufferedLocatorStream<T>
+where
+    T: SObjectRepresentation + Unpin,
+{
     pub(crate) fn new(
-        initial_values: Option<BufferedLocatorStreamState>,
-        manager: Box<dyn BufferedLocatorManager>,
+        initial_values: Option<BufferedLocatorStreamState<T>>,
+        manager: Box<dyn BufferedLocatorManager<Output = T>>,
     ) -> Self {
         BufferedLocatorStream {
             manager,
@@ -64,7 +88,7 @@ impl BufferedLocatorStream {
         }
     }
 
-    fn try_to_yield(&mut self) -> Option<SObject> {
+    fn try_to_yield(&mut self) -> Option<T> {
         if let Some(state) = &mut self.state {
             if let Some(item) = state.buffer.pop_front() {
                 self.yielded += 1;
@@ -78,8 +102,11 @@ impl BufferedLocatorStream {
     }
 }
 
-impl Stream for BufferedLocatorStream {
-    type Item = Result<SObject>;
+impl<T> Stream for BufferedLocatorStream<T>
+where
+    T: SObjectRepresentation + Unpin,
+{
+    type Item = Result<T>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {

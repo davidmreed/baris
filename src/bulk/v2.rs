@@ -1,4 +1,5 @@
 use serde_derive::{Deserialize, Serialize};
+use std::marker::PhantomData;
 use std::{collections::HashMap, ops::Deref, time::Duration};
 
 use anyhow::Result;
@@ -7,10 +8,12 @@ use std::collections::VecDeque;
 use tokio::task::{spawn, JoinHandle};
 use tokio::time::sleep;
 
+use crate::data::SObjectRepresentation;
+use crate::streams::value_from_csv;
 use crate::{
     data::DateTime,
     streams::{BufferedLocatorManager, BufferedLocatorStream, BufferedLocatorStreamState},
-    Connection, SObject, SObjectType, SalesforceError, SalesforceId,
+    Connection, SObjectType, SalesforceError, SalesforceId,
 };
 
 const POLL_INTERVAL: u64 = 10;
@@ -94,17 +97,23 @@ pub struct BulkQueryJobDetail {
 
 const RESULTS_CHUNK_SIZE: u32 = 2000;
 
-struct BulkQueryLocatorManager {
+struct BulkQueryLocatorManager<T: SObjectRepresentation> {
     job: BulkQueryJob,
     conn: Connection,
     sobject_type: SObjectType,
+    phantom: PhantomData<T>,
 }
 
-impl BufferedLocatorManager for BulkQueryLocatorManager {
+impl<T> BufferedLocatorManager for BulkQueryLocatorManager<T>
+where
+    T: SObjectRepresentation,
+{
+    type Output = T;
+
     fn get_next_future(
         &mut self,
-        state: Option<BufferedLocatorStreamState>,
-    ) -> JoinHandle<Result<BufferedLocatorStreamState>> {
+        state: Option<BufferedLocatorStreamState<T>>,
+    ) -> JoinHandle<Result<BufferedLocatorStreamState<T>>> {
         let conn = self.conn.clone();
         let sobject_type = self.sobject_type.clone();
         let job_id = *self.job;
@@ -156,8 +165,13 @@ impl BufferedLocatorManager for BulkQueryLocatorManager {
             // TODO: respect this job's settings for delimiter.
             let buffer = csv::Reader::from_reader(&*content)
                 .into_deserialize::<HashMap<String, String>>()
-                .map(|r| Ok(SObject::from_csv(&r?, &sobject_type)?))
-                .collect::<Result<VecDeque<SObject>>>()?;
+                .map(|r| {
+                    Ok(T::from_value(
+                        &value_from_csv(&r?, &sobject_type)?,
+                        &sobject_type,
+                    )?)
+                })
+                .collect::<Result<VecDeque<T>>>()?;
 
             Ok(BufferedLocatorStreamState {
                 buffer,
@@ -230,17 +244,22 @@ impl BulkQueryJob {
         .await?
     }
 
-    pub async fn get_results_stream(
+    pub async fn get_results_stream<T: 'static>(
+        // TODO: why is the lifetime required?
         &self,
         conn: &Connection,
         sobject_type: &SObjectType,
-    ) -> BufferedLocatorStream {
+    ) -> BufferedLocatorStream<T>
+    where
+        T: SObjectRepresentation + Unpin,
+    {
         BufferedLocatorStream::new(
             None,
             Box::new(BulkQueryLocatorManager {
                 job: *self,
                 sobject_type: sobject_type.clone(),
                 conn: conn.clone(),
+                phantom: PhantomData,
             }),
         )
     }

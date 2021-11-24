@@ -226,6 +226,8 @@ impl FromStr for Date {
     }
 }
 
+// TODO: add field type for Geolocation
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Address {
@@ -350,7 +352,7 @@ impl FieldValue {
 }
 
 pub trait SObjectRepresentation:
-    SObjectCreation + SObjectSerialization + Send + Sync + Sized
+    SObjectCreation + SObjectSerialization + Send + Sync + Sized + 'static
 {
     fn get_id(&self) -> Option<SalesforceId>;
     fn set_id(&mut self, id: Option<SalesforceId>);
@@ -473,6 +475,15 @@ impl SObjectSerialization for SObject {
                 if map.contains_key("id") {
                     map.remove("id");
                 }
+                if map.contains_key("Id") {
+                    map.remove("Id");
+                }
+                if map.contains_key("iD") {
+                    map.remove("iD");
+                }
+                if map.contains_key("ID") {
+                    map.remove("ID");
+                }
             }
             Ok(value)
         } else {
@@ -583,27 +594,6 @@ impl SObject {
     pub fn put(&mut self, key: &str, val: FieldValue) {
         self.fields.insert(key.to_lowercase(), val);
     }
-
-    pub(crate) fn from_csv(
-        rec: &HashMap<String, String>,
-        sobjecttype: &SObjectType,
-    ) -> Result<SObject> {
-        let mut ret = SObject::new(sobjecttype);
-
-        for k in rec.keys() {
-            // Get the describe for this field.
-            if k != "attributes" {
-                let describe = sobjecttype.get_describe().get_field(k).unwrap();
-
-                ret.put(
-                    &k.to_lowercase(),
-                    FieldValue::from_str(rec.get(k).unwrap(), &describe.soap_type)?,
-                );
-            }
-        }
-
-        Ok(ret)
-    }
 }
 
 impl From<&FieldValue> for serde_json::Value {
@@ -617,9 +607,7 @@ impl From<&FieldValue> for serde_json::Value {
             }
             FieldValue::Boolean(i) => serde_json::Value::Bool(*i),
             FieldValue::String(i) => serde_json::Value::String(i.clone()),
-            FieldValue::DateTime(i) => {
-                serde_json::Value::String(i.to_string())
-            }
+            FieldValue::DateTime(i) => serde_json::Value::String(i.to_string()),
             FieldValue::Time(i) => serde_json::Value::String(i.to_string()),
             FieldValue::Date(i) => serde_json::Value::String(i.to_string()),
             FieldValue::Id(i) => serde_json::Value::String(i.to_string()),
@@ -790,7 +778,6 @@ pub enum SoapType {
 #[cfg(test)]
 mod test {
     use super::*;
-    use chrono::TimeZone;
 
     #[test]
     fn test_salesforce_id() {
@@ -816,8 +803,13 @@ mod test {
 
     #[test]
     fn test_datetimes_parse() -> Result<()> {
-        assert!(DateTime::new(2021, 11, 19, 01, 51, 47, 323)?.to_string() == "2021-11-19T01:51:47.323Z");
-        assert!("2021-11-19T01:51:47.323Z".parse::<DateTime>()? == DateTime::new(2021, 11, 19, 01, 51, 47, 323)?);
+        assert!(
+            DateTime::new(2021, 11, 19, 01, 51, 47, 323)?.to_string() == "2021-11-19T01:51:47.323Z"
+        );
+        assert!(
+            "2021-11-19T01:51:47.323Z".parse::<DateTime>()?
+                == DateTime::new(2021, 11, 19, 01, 51, 47, 323)?
+        );
         Ok(())
     }
 

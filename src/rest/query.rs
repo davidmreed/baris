@@ -1,6 +1,7 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, marker::PhantomData};
 
 use anyhow::Result;
+use async_trait::async_trait;
 use reqwest::Method;
 use serde_derive::Deserialize;
 use serde_json::{Map, Value};
@@ -9,54 +10,65 @@ use tokio_stream::StreamExt;
 
 use crate::{
     api::SalesforceRequest,
-    data::SObjectCreation,
+    data::SObjectRepresentation,
     streams::{BufferedLocatorManager, BufferedLocatorStream, BufferedLocatorStreamState},
-    Connection, SObject, SObjectType, SalesforceError,
+    Connection, SObjectType, SalesforceError,
 };
 
-impl SObject {
-    pub async fn query(
+#[async_trait]
+pub trait Queryable: SObjectRepresentation + Unpin {
+    async fn query(
         conn: &Connection,
         sobject_type: &SObjectType,
         query: &str,
         all: bool,
-    ) -> Result<BufferedLocatorStream> {
+    ) -> Result<BufferedLocatorStream<Self>> {
         let request = QueryRequest::new(sobject_type, query, all);
 
         Ok(conn.execute(&request).await?)
     }
 
-    pub async fn query_vec(
+    async fn query_vec(
         conn: &Connection,
         sobject_type: &SObjectType,
         query: &str,
         all: bool,
-    ) -> Result<Vec<SObject>> {
+    ) -> Result<Vec<Self>> {
         Ok(Self::query(conn, sobject_type, query, all)
             .await?
-            .collect::<Result<Vec<SObject>>>()
+            .collect::<Result<Vec<Self>>>()
             .await?)
     }
 }
 
-pub struct QueryRequest {
+impl<T> Queryable for T where T: SObjectRepresentation + Unpin {}
+
+pub struct QueryRequest<T: SObjectRepresentation> {
     query: String,
     sobject_type: SObjectType,
     all: bool,
+    phantom: PhantomData<T>,
 }
 
-impl QueryRequest {
-    pub fn new(sobject_type: &SObjectType, query: &str, all: bool) -> QueryRequest {
+impl<T> QueryRequest<T>
+where
+    T: SObjectRepresentation,
+{
+    pub fn new(sobject_type: &SObjectType, query: &str, all: bool) -> QueryRequest<T> {
         QueryRequest {
             query: query.to_owned(),
             sobject_type: sobject_type.clone(),
             all,
+            phantom: PhantomData,
         }
     }
 }
 
-impl SalesforceRequest for QueryRequest {
-    type ReturnValue = BufferedLocatorStream;
+impl<T> SalesforceRequest for QueryRequest<T>
+where
+    T: SObjectRepresentation + Unpin,
+{
+    type ReturnValue = BufferedLocatorStream<T>;
 
     fn get_query_parameters(&self) -> Option<Value> {
         let mut hm = Map::new();
@@ -88,6 +100,7 @@ impl SalesforceRequest for QueryRequest {
                 Box::new(QueryStreamLocatorManager {
                     conn: conn.clone(),
                     sobject_type: self.sobject_type.clone(),
+                    phantom: PhantomData,
                 }),
             ))
         } else {
@@ -106,15 +119,18 @@ struct QueryResult {
 }
 
 impl QueryResult {
-    pub fn to_locator_stream_state(
+    pub fn to_locator_stream_state<T>(
         self,
         sobject_type: &SObjectType,
-    ) -> Result<BufferedLocatorStreamState> {
+    ) -> Result<BufferedLocatorStreamState<T>>
+    where
+        T: SObjectRepresentation,
+    {
         Ok(BufferedLocatorStreamState::new(
             self.records
                 .iter()
-                .map(|r| SObject::from_value(r, sobject_type))
-                .collect::<Result<VecDeque<SObject>>>()?,
+                .map(|r| T::from_value(r, sobject_type))
+                .collect::<Result<VecDeque<T>>>()?,
             self.next_records_url,
             Some(self.total_size),
             self.done,
@@ -122,16 +138,22 @@ impl QueryResult {
     }
 }
 
-struct QueryStreamLocatorManager {
+struct QueryStreamLocatorManager<T: SObjectRepresentation> {
     conn: Connection,
     sobject_type: SObjectType,
+    phantom: PhantomData<T>,
 }
 
-impl BufferedLocatorManager for QueryStreamLocatorManager {
+impl<T> BufferedLocatorManager for QueryStreamLocatorManager<T>
+where
+    T: SObjectRepresentation + 'static, // TODO: why is this lifetime required?
+{
+    type Output = T;
+
     fn get_next_future(
         &mut self,
-        state: Option<BufferedLocatorStreamState>,
-    ) -> JoinHandle<Result<BufferedLocatorStreamState>> {
+        state: Option<BufferedLocatorStreamState<T>>,
+    ) -> JoinHandle<Result<BufferedLocatorStreamState<T>>> {
         let conn = self.conn.clone();
         let sobject_type = self.sobject_type.clone();
 

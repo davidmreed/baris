@@ -2,13 +2,38 @@ use anyhow::Result;
 use futures::future::join_all;
 use itertools::Itertools;
 use reqwest::Url;
+use serde_derive::{Deserialize, Serialize};
 use std::env;
 
-use crate::data::SObjectRepresentation;
+use crate::data::{DateTime, SObjectRepresentation};
 use crate::rest::rows::SObjectDML;
+use crate::SalesforceId;
 use crate::{
-    auth::AccessTokenAuth, rest::collections::SObjectCollection, Connection, FieldValue, SObject,
+    auth::AccessTokenAuth, rest::collections::SObjectCollection, rest::query::Queryable,
+    Connection, FieldValue, SObject,
 };
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Account {
+    pub id: Option<SalesforceId>,
+    pub name: String,
+    pub last_modified_date: Option<DateTime>,
+}
+
+impl SObjectRepresentation for Account {
+    fn get_id(&self) -> Option<SalesforceId> {
+        self.id
+    }
+
+    fn set_id(&mut self, id: Option<SalesforceId>) {
+        self.id = id;
+    }
+
+    fn get_api_name(&self) -> &str {
+        "Account"
+    }
+}
 
 fn get_test_connection() -> Result<Connection> {
     let access_token = env::var("SESSION_ID")?;
@@ -65,7 +90,52 @@ async fn test_generic_sobject_rows() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_collections_parallel() -> Result<()> {
+async fn test_concrete_sobject_rows() -> Result<()> {
+    let mut conn = get_test_connection()?;
+    let account_type = conn.get_type("Account").await?;
+
+    let before_count = Account::query_vec(
+        &conn,
+        &account_type,
+        "SELECT Id, Name FROM Account WHERE Name = 'Test'",
+        false,
+    )
+    .await?
+    .len();
+
+    let mut account = Account {
+        id: None,
+        name: "Test".to_owned(),
+        last_modified_date: None,
+    };
+
+    account.create(&conn).await?;
+
+    let mut accounts = Account::query_vec(
+        &conn,
+        &account_type,
+        "SELECT Id, Name FROM Account WHERE Name = 'Test'",
+        false,
+    )
+    .await?;
+
+    assert!(accounts.len() == before_count + 1);
+    assert!(accounts[0].name == "Foo");
+
+    account.name = "Test 2".to_owned();
+    account.update(&conn).await?;
+
+    let updated_account =
+        Account::retrieve(&conn, &account_type, account.get_id().unwrap().to_owned()).await?;
+    assert!(updated_account.name == "Test 2");
+
+    accounts[0].delete(&conn).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_generic_collections_parallel() -> Result<()> {
     let mut conn = get_test_connection()?;
     let account_type = conn.get_type("Account").await?;
 
