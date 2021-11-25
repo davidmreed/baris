@@ -10,11 +10,25 @@ use tokio_stream::StreamExt;
 
 use crate::{
     api::SalesforceRequest,
-    data::SObjectRepresentation,
+    data::{SObjectCreation, SObjectRepresentation},
     streams::{BufferedLocatorManager, BufferedLocatorStream, BufferedLocatorStreamState},
     Connection, SObjectType, SalesforceError,
 };
+/*
+pub struct AggregateResult(HashMap<String, FieldValue>);
 
+impl SObjectCreation for AggregateResult {
+    fn from_value(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<Self> {
+        todo!()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CountQueryResult {
+    total_size: u64,
+}
+*/
 #[async_trait]
 pub trait Queryable: SObjectRepresentation + Unpin {
     async fn query(

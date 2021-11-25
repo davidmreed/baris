@@ -116,8 +116,12 @@ impl TryFrom<&str> for DateTime {
     type Error = anyhow::Error;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
+        // Salesforce's version of RFC3339 doesn't include a colon as required by the standard,
+        // giving +0000 instead of the expected +00:00
+
         Ok(DateTime {
-            0: chrono::DateTime::parse_from_rfc3339(value)?.with_timezone(&Utc),
+            0: chrono::DateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.3fZ%z")?
+                .with_timezone(&Utc),
         })
     }
 }
@@ -127,7 +131,7 @@ impl Display for DateTime {
         write!(
             f,
             "{}",
-            self.0.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            self.0.format("%Y-%m-%dT%H:%M:%S%.3fZ%z").to_string()
         )
     }
 }
@@ -625,6 +629,12 @@ impl From<&FieldValue> for String {
     }
 }
 
+impl From<FieldValue> for String {
+    fn from(f: FieldValue) -> String {
+        f.as_string()
+    }
+}
+
 impl FieldValue {
     pub fn as_string(&self) -> String {
         match self {
@@ -649,6 +659,7 @@ impl FieldValue {
         }
 
         match soap_type {
+            // TODO
             SoapType::Address | SoapType::Any | SoapType::Blob => panic!("Not supported"),
             SoapType::Boolean => {
                 if let serde_json::Value::Bool(b) = value {
@@ -804,10 +815,11 @@ mod test {
     #[test]
     fn test_datetimes_parse() -> Result<()> {
         assert!(
-            DateTime::new(2021, 11, 19, 01, 51, 47, 323)?.to_string() == "2021-11-19T01:51:47.323Z"
+            DateTime::new(2021, 11, 19, 01, 51, 47, 323)?.to_string()
+                == "2021-11-19T01:51:47.323+0000"
         );
         assert!(
-            "2021-11-19T01:51:47.323Z".parse::<DateTime>()?
+            "2021-11-19T01:51:47.323+0000".parse::<DateTime>()?
                 == DateTime::new(2021, 11, 19, 01, 51, 47, 323)?
         );
         Ok(())
@@ -816,12 +828,12 @@ mod test {
     #[test]
     fn test_datetimes_serde() -> Result<()> {
         assert!(
-            serde_json::from_str::<DateTime>("\"2021-11-19T01:51:47.323Z\"")?
+            serde_json::from_str::<DateTime>("\"2021-11-19T01:51:47.323+0000\"")?
                 == DateTime::new(2021, 11, 19, 01, 51, 47, 323)?
         );
         assert!(
             serde_json::to_string(&DateTime::new(2021, 11, 19, 01, 51, 47, 323)?)?
-                == "\"2021-11-19T01:51:47.323Z\""
+                == "\"2021-11-19T01:51:47.323+0000\""
         );
         Ok(())
     }
