@@ -17,6 +17,7 @@ use super::errors::SalesforceError;
 
 #[derive(Serialize, Deserialize, Copy, Clone, PartialEq)]
 #[serde(try_from = "String")]
+#[serde(into="String")]
 pub struct SalesforceId {
     id: [u8; 18],
 }
@@ -79,6 +80,12 @@ impl fmt::Debug for SalesforceId {
 impl fmt::Display for SalesforceId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", std::str::from_utf8(&self.id).unwrap())
+    }
+}
+
+impl From<SalesforceId> for String {
+    fn from(value: SalesforceId) -> String {
+        value.to_string()
     }
 }
 
@@ -437,8 +444,18 @@ where
                 );
             } else {
                 // TODO: handle case-insensitivity
+
                 if map.contains_key("id") {
                     map.remove("id");
+                }
+                if map.contains_key("Id") {
+                    map.remove("Id");
+                }
+                if map.contains_key("iD") {
+                    map.remove("iD");
+                }
+                if map.contains_key("ID") {
+                    map.remove("ID");
                 }
             }
             Ok(value)

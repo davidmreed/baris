@@ -154,6 +154,7 @@ where
     type ReturnValue = ();
 
     fn get_body(&self) -> Option<Value> {
+        println!("Update body: {}", self.sobject.to_value_with_options(false, false).unwrap());
         self.sobject.to_value_with_options(false, false).ok()
     }
 
@@ -347,7 +348,6 @@ where
 
     fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
         if let Some(body) = body {
-            println!("Result: {:?}", body);
             Ok(T::from_value(body, &self.sobject_type)?)
         } else {
             Err(SalesforceError::ResponseBodyExpected.into())

@@ -55,33 +55,33 @@ async fn test_generic_sobject_rows() -> Result<()> {
     let before_count = SObject::query_vec(
         &conn,
         &account_type,
-        "SELECT Id, Name FROM Account WHERE Name = 'Test'",
+        "SELECT Id, Name FROM Account WHERE Name = 'Generic Test'",
         false,
     )
     .await?
     .len();
 
-    let mut account = SObject::new(&account_type).with_str("Name", "Test");
+    let mut account = SObject::new(&account_type).with_str("Name", "Generic Test");
 
     account.create(&conn).await?;
 
     let mut accounts = SObject::query_vec(
         &conn,
         &account_type,
-        "SELECT Id, Name FROM Account WHERE Name = 'Test'",
+        "SELECT Id, Name FROM Account WHERE Name = 'Generic Test'",
         false,
     )
     .await?;
 
     assert_eq!(accounts.len(), before_count + 1);
-    assert_eq!(accounts[0].get("Name").unwrap(), &FieldValue::String("Test".to_owned()));
+    assert_eq!(accounts[0].get("Name").unwrap(), &FieldValue::String("Generic Test".to_owned()));
 
-    account.put("Name", FieldValue::String("Test 2".to_owned()));
+    account.put("Name", FieldValue::String("Generic Test 2".to_owned()));
     account.update(&conn).await?;
 
     let updated_account =
         SObject::retrieve(&conn, &account_type, account.get_id().unwrap().to_owned()).await?;
-    assert_eq!(updated_account.get("Name").unwrap(), &FieldValue::String("Test 2".to_owned()));
+    assert_eq!(updated_account.get("Name").unwrap(), &FieldValue::String("Generic Test 2".to_owned()));
 
     accounts[0].delete(&conn).await?;
 
@@ -96,7 +96,7 @@ async fn test_concrete_sobject_rows() -> Result<()> {
     let before_count = Account::query_vec(
         &conn,
         &account_type,
-        "SELECT Id, Name FROM Account WHERE Name = 'Test'",
+        "SELECT Id, Name FROM Account WHERE Name = 'Concrete Test'",
         false,
     )
     .await?
@@ -104,7 +104,7 @@ async fn test_concrete_sobject_rows() -> Result<()> {
 
     let mut account = Account {
         id: None,
-        name: "Test".to_owned(),
+        name: "Concrete Test".to_owned(),
     };
 
     account.create(&conn).await?;
@@ -112,20 +112,20 @@ async fn test_concrete_sobject_rows() -> Result<()> {
     let mut accounts = Account::query_vec(
         &conn,
         &account_type,
-        "SELECT Id, Name FROM Account WHERE Name = 'Test'",
+        "SELECT Id, Name FROM Account WHERE Name = 'Concrete Test'",
         false,
     )
     .await?;
 
     assert_eq!(accounts.len(), before_count + 1);
-    assert_eq!(accounts[0].name, "Test");
+    assert_eq!(accounts[0].name, "Concrete Test");
 
-    account.name = "Test 2".to_owned();
+    account.name = "Concrete Test 2".to_owned();
     account.update(&conn).await?;
 
     let updated_account =
         Account::retrieve(&conn, &account_type, account.get_id().unwrap().to_owned()).await?;
-    assert_eq!(updated_account.name, "Test 2");
+    assert_eq!(updated_account.name, "Concrete Test 2");
 
     accounts[0].delete(&conn).await?;
 
