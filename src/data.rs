@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use anyhow::{Error, Result};
 use chrono::{TimeZone, Utc};
+use serde::{Serialize, Serializer};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -81,7 +82,7 @@ impl fmt::Display for SalesforceId {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Deserialize)]
 #[serde(try_from = "&str")]
 pub struct DateTime(chrono::DateTime<chrono::Utc>);
 
@@ -120,7 +121,7 @@ impl TryFrom<&str> for DateTime {
         // giving +0000 instead of the expected +00:00
 
         Ok(DateTime {
-            0: chrono::DateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.3fZ%z")?
+            0: chrono::DateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.3f%z")?
                 .with_timezone(&Utc),
         })
     }
@@ -131,7 +132,7 @@ impl Display for DateTime {
         write!(
             f,
             "{}",
-            self.0.format("%Y-%m-%dT%H:%M:%S%.3fZ%z").to_string()
+            self.0.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string()
         )
     }
 }
@@ -144,7 +145,20 @@ impl FromStr for DateTime {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+impl Serialize for DateTime {
+    fn serialize<S>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Deserialize)]
+#[serde(try_from="&str")]
 pub struct Time(chrono::NaiveTime);
 
 impl Time {
@@ -186,6 +200,20 @@ impl FromStr for Time {
         s.try_into()
     }
 }
+
+
+impl Serialize for Time {
+    fn serialize<S>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Date(chrono::NaiveDate);
@@ -814,41 +842,62 @@ mod test {
 
     #[test]
     fn test_datetimes_parse() -> Result<()> {
-        assert!(
-            DateTime::new(2021, 11, 19, 01, 51, 47, 323)?.to_string()
-                == "2021-11-19T01:51:47.323+0000"
-        );
-        assert!(
-            "2021-11-19T01:51:47.323+0000".parse::<DateTime>()?
-                == DateTime::new(2021, 11, 19, 01, 51, 47, 323)?
+        assert_eq!(
+            "2021-11-19T01:51:47.323+0000".parse::<DateTime>()?,
+            DateTime::new(2021, 11, 19, 01, 51, 47, 323)?
         );
         Ok(())
     }
 
     #[test]
-    fn test_datetimes_serde() -> Result<()> {
-        assert!(
-            serde_json::from_str::<DateTime>("\"2021-11-19T01:51:47.323+0000\"")?
-                == DateTime::new(2021, 11, 19, 01, 51, 47, 323)?
+    fn test_datetimes_format() -> Result<()> {
+        assert_eq!(
+            DateTime::new(2021, 11, 19, 01, 51, 47, 323)?.to_string(),
+            "2021-11-19T01:51:47.323+0000"
         );
-        assert!(
-            serde_json::to_string(&DateTime::new(2021, 11, 19, 01, 51, 47, 323)?)?
-                == "\"2021-11-19T01:51:47.323+0000\""
+        Ok(())
+    }
+
+    #[test]
+    fn test_datetimes_deserialize() -> Result<()> {
+        assert_eq!(
+            serde_json::from_str::<DateTime>("\"2021-11-19T01:51:47.323+0000\"")?,
+            DateTime::new(2021, 11, 19, 01, 51, 47, 323)?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_datetimes_serialize() -> Result<()> {
+        assert_eq!(
+            serde_json::to_string(&DateTime::new(2021, 11, 19, 01, 51, 47, 323)?)?,
+            "\"2021-11-19T01:51:47.323+0000\""
         );
         Ok(())
     }
 
     #[test]
     fn test_dates_parse() -> Result<()> {
-        assert!("2021-11-15".parse::<Date>()? == Date::new(2021, 11, 15)?);
-        assert!(Date::new(2021, 11, 15)?.to_string() == "2021-11-15");
+        assert_eq!("2021-11-15".parse::<Date>()?,
+        Date::new(2021, 11, 15)?);
+        Ok(())
+    }
+    
+    #[test]
+    fn test_dates_format() -> Result<()> {
+        assert_eq!(Date::new(2021, 11, 15)?.to_string(), "2021-11-15");
         Ok(())
     }
 
     #[test]
-    fn test_dates_serde() -> Result<()> {
-        assert!(serde_json::from_str::<Date>("\"2021-11-15\"")? == Date::new(2021, 11, 15)?);
-        assert!(serde_json::to_string(&Date::new(2021, 11, 15)?)? == "\"2021-11-15\"");
+    fn test_dates_deserialize() -> Result<()> {
+        assert_eq!(serde_json::from_str::<Date>("\"2021-11-15\"")?, Date::new(2021, 11, 15)?);
+        Ok(())
+    }
+    
+    #[test]
+    fn test_dates_serialize() -> Result<()> {
+        assert_eq!(serde_json::to_string(&Date::new(2021, 11, 15)?)?, "\"2021-11-15\"");
         Ok(())
     }
 

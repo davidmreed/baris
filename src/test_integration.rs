@@ -14,11 +14,10 @@ use crate::{
 };
 
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 struct Account {
     pub id: Option<SalesforceId>,
     pub name: String,
-    pub last_modified_date: Option<DateTime>,
 }
 
 impl SObjectRepresentation for Account {
@@ -50,7 +49,7 @@ fn get_test_connection() -> Result<Connection> {
 
 #[tokio::test]
 async fn test_generic_sobject_rows() -> Result<()> {
-    let mut conn = get_test_connection()?;
+    let mut conn = get_test_connection().expect("No connection present");
     let account_type = conn.get_type("Account").await?;
 
     let before_count = SObject::query_vec(
@@ -74,15 +73,15 @@ async fn test_generic_sobject_rows() -> Result<()> {
     )
     .await?;
 
-    assert!(accounts.len() == before_count + 1);
-    assert!(accounts[0].get("Name").unwrap() == &FieldValue::String("Test".to_owned()));
+    assert_eq!(accounts.len(), before_count + 1);
+    assert_eq!(accounts[0].get("Name").unwrap(), &FieldValue::String("Test".to_owned()));
 
     account.put("Name", FieldValue::String("Test 2".to_owned()));
     account.update(&conn).await?;
 
     let updated_account =
         SObject::retrieve(&conn, &account_type, account.get_id().unwrap().to_owned()).await?;
-    assert!(updated_account.get("Name").unwrap() == &FieldValue::String("Test 2".to_owned()));
+    assert_eq!(updated_account.get("Name").unwrap(), &FieldValue::String("Test 2".to_owned()));
 
     accounts[0].delete(&conn).await?;
 
@@ -91,7 +90,7 @@ async fn test_generic_sobject_rows() -> Result<()> {
 
 #[tokio::test]
 async fn test_concrete_sobject_rows() -> Result<()> {
-    let mut conn = get_test_connection()?;
+    let mut conn = get_test_connection().expect("No connection present");
     let account_type = conn.get_type("Account").await?;
 
     let before_count = Account::query_vec(
@@ -106,7 +105,6 @@ async fn test_concrete_sobject_rows() -> Result<()> {
     let mut account = Account {
         id: None,
         name: "Test".to_owned(),
-        last_modified_date: None,
     };
 
     account.create(&conn).await?;
@@ -119,15 +117,15 @@ async fn test_concrete_sobject_rows() -> Result<()> {
     )
     .await?;
 
-    assert!(accounts.len() == before_count + 1);
-    assert!(accounts[0].name == "Foo");
+    assert_eq!(accounts.len(), before_count + 1);
+    assert_eq!(accounts[0].name, "Test");
 
     account.name = "Test 2".to_owned();
     account.update(&conn).await?;
 
     let updated_account =
         Account::retrieve(&conn, &account_type, account.get_id().unwrap().to_owned()).await?;
-    assert!(updated_account.name == "Test 2");
+    assert_eq!(updated_account.name, "Test 2");
 
     accounts[0].delete(&conn).await?;
 

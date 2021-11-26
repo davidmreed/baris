@@ -103,7 +103,7 @@ where
     type ReturnValue = DmlResultWithId;
 
     fn get_body(&self) -> Option<Value> {
-        self.sobject.to_value().ok()
+        self.sobject.to_value_with_options(false, false).ok()
     }
 
     fn get_url(&self) -> String {
