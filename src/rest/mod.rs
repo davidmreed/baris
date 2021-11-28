@@ -10,6 +10,7 @@ pub mod collections;
 pub mod composite;
 pub mod describe;
 pub mod query;
+pub mod query_builder;
 pub mod rows;
 
 // Result structures for DML operations, shared across various APIs.
