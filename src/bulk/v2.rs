@@ -12,7 +12,7 @@ use crate::data::SObjectRepresentation;
 use crate::streams::value_from_csv;
 use crate::{
     data::DateTime,
-    streams::{BufferedLocatorManager, BufferedLocatorStream, BufferedLocatorStreamState},
+    streams::{ResultStream, ResultStreamManager, ResultStreamState},
     Connection, SObjectType, SalesforceError, SalesforceId,
 };
 
@@ -104,7 +104,7 @@ struct BulkQueryLocatorManager<T: SObjectRepresentation> {
     phantom: PhantomData<T>,
 }
 
-impl<T> BufferedLocatorManager for BulkQueryLocatorManager<T>
+impl<T> ResultStreamManager for BulkQueryLocatorManager<T>
 where
     T: SObjectRepresentation,
 {
@@ -112,8 +112,8 @@ where
 
     fn get_next_future(
         &mut self,
-        state: Option<BufferedLocatorStreamState<T>>,
-    ) -> JoinHandle<Result<BufferedLocatorStreamState<T>>> {
+        state: Option<ResultStreamState<T>>,
+    ) -> JoinHandle<Result<ResultStreamState<T>>> {
         let conn = self.conn.clone();
         let sobject_type = self.sobject_type.clone();
         let job_id = *self.job;
@@ -173,7 +173,7 @@ where
                 })
                 .collect::<Result<VecDeque<T>>>()?;
 
-            Ok(BufferedLocatorStreamState {
+            Ok(ResultStreamState {
                 buffer,
                 locator,
                 total_size: None, // TODO
@@ -249,11 +249,11 @@ impl BulkQueryJob {
         &self,
         conn: &Connection,
         sobject_type: &SObjectType,
-    ) -> BufferedLocatorStream<T>
+    ) -> ResultStream<T>
     where
         T: SObjectRepresentation + Unpin,
     {
-        BufferedLocatorStream::new(
+        ResultStream::new(
             None,
             Box::new(BulkQueryLocatorManager {
                 job: *self,

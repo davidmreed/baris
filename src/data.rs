@@ -17,7 +17,7 @@ use super::errors::SalesforceError;
 
 #[derive(Serialize, Deserialize, Copy, Clone, PartialEq)]
 #[serde(try_from = "String")]
-#[serde(into="String")]
+#[serde(into = "String")]
 pub struct SalesforceId {
     id: [u8; 18],
 }
@@ -73,12 +73,14 @@ impl TryFrom<&str> for SalesforceId {
 
 impl fmt::Debug for SalesforceId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Cannot panic; Ids are guaranteed to be valid UTF-8
         write!(f, "{}", std::str::from_utf8(&self.id).unwrap())
     }
 }
 
 impl fmt::Display for SalesforceId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Cannot panic; Ids are guaranteed to be valid UTF-8
         write!(f, "{}", std::str::from_utf8(&self.id).unwrap())
     }
 }
@@ -153,10 +155,7 @@ impl FromStr for DateTime {
 }
 
 impl Serialize for DateTime {
-    fn serialize<S>(
-        &self,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -165,7 +164,7 @@ impl Serialize for DateTime {
 }
 
 #[derive(Debug, PartialEq, Clone, Deserialize)]
-#[serde(try_from="&str")]
+#[serde(try_from = "&str")]
 pub struct Time(chrono::NaiveTime);
 
 impl Time {
@@ -208,19 +207,14 @@ impl FromStr for Time {
     }
 }
 
-
 impl Serialize for Time {
-    fn serialize<S>(
-        &self,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         serializer.serialize_str(&self.to_string())
     }
 }
-
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Date(chrono::NaiveDate);
@@ -380,7 +374,6 @@ impl FieldValue {
             SoapType::Double => Ok(FieldValue::Double(input.parse()?)),
             SoapType::Boolean => Ok(FieldValue::Boolean(input.parse()?)),
             SoapType::String => Ok(FieldValue::String(input.to_owned())),
-            // TODO: validate chrono parse behavior against API.
             SoapType::DateTime => Ok(FieldValue::DateTime(input.parse()?)),
             SoapType::Time => Ok(FieldValue::Time(input.parse()?)),
             SoapType::Date => Ok(FieldValue::Date(input.parse()?)),
@@ -895,11 +888,10 @@ mod test {
 
     #[test]
     fn test_dates_parse() -> Result<()> {
-        assert_eq!("2021-11-15".parse::<Date>()?,
-        Date::new(2021, 11, 15)?);
+        assert_eq!("2021-11-15".parse::<Date>()?, Date::new(2021, 11, 15)?);
         Ok(())
     }
-    
+
     #[test]
     fn test_dates_format() -> Result<()> {
         assert_eq!(Date::new(2021, 11, 15)?.to_string(), "2021-11-15");
@@ -908,13 +900,19 @@ mod test {
 
     #[test]
     fn test_dates_deserialize() -> Result<()> {
-        assert_eq!(serde_json::from_str::<Date>("\"2021-11-15\"")?, Date::new(2021, 11, 15)?);
+        assert_eq!(
+            serde_json::from_str::<Date>("\"2021-11-15\"")?,
+            Date::new(2021, 11, 15)?
+        );
         Ok(())
     }
-    
+
     #[test]
     fn test_dates_serialize() -> Result<()> {
-        assert_eq!(serde_json::to_string(&Date::new(2021, 11, 15)?)?, "\"2021-11-15\"");
+        assert_eq!(
+            serde_json::to_string(&Date::new(2021, 11, 15)?)?,
+            "\"2021-11-15\""
+        );
         Ok(())
     }
 

@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 use tokio::task::JoinHandle;
 use tokio_stream::Stream;
 
-use crate::{data::SObjectRepresentation, FieldValue, SObjectType};
+use crate::{data::SObjectCreation, FieldValue, SObjectType};
 
 pub fn value_from_csv(rec: &HashMap<String, String>, sobjecttype: &SObjectType) -> Result<Value> {
     let mut ret = Map::new();
@@ -28,33 +28,33 @@ pub fn value_from_csv(rec: &HashMap<String, String>, sobjecttype: &SObjectType) 
     Ok(Value::Object(ret))
 }
 
-pub(crate) trait BufferedLocatorManager: Send + Sync {
-    type Output: SObjectRepresentation;
+pub(crate) trait ResultStreamManager: Send + Sync {
+    type Output: SObjectCreation + Send + Sync;
 
     fn get_next_future(
         &mut self,
-        state: Option<BufferedLocatorStreamState<Self::Output>>,
-    ) -> JoinHandle<Result<BufferedLocatorStreamState<Self::Output>>>;
+        state: Option<ResultStreamState<Self::Output>>,
+    ) -> JoinHandle<Result<ResultStreamState<Self::Output>>>;
 }
 
-pub(crate) struct BufferedLocatorStreamState<T: SObjectRepresentation> {
+pub(crate) struct ResultStreamState<T: SObjectCreation + Send + Sync> {
     pub buffer: VecDeque<T>, // TODO: we should decouple the buffer from the locator state to enable prefetching
     pub locator: Option<String>,
     pub total_size: Option<usize>,
     pub done: bool,
 }
 
-impl<T> BufferedLocatorStreamState<T>
+impl<T> ResultStreamState<T>
 where
-    T: SObjectRepresentation,
+    T: SObjectCreation + Send + Sync,
 {
     pub fn new(
         buffer: VecDeque<T>,
         locator: Option<String>,
         total_size: Option<usize>,
         done: bool,
-    ) -> BufferedLocatorStreamState<T> {
-        BufferedLocatorStreamState {
+    ) -> ResultStreamState<T> {
+        ResultStreamState {
             buffer,
             locator,
             total_size,
@@ -63,23 +63,23 @@ where
     }
 }
 
-pub struct BufferedLocatorStream<T: SObjectRepresentation + Unpin> {
-    manager: Box<dyn BufferedLocatorManager<Output = T>>,
-    state: Option<BufferedLocatorStreamState<T>>,
+pub struct ResultStream<T: SObjectCreation + Send + Sync + Unpin> {
+    manager: Box<dyn ResultStreamManager<Output = T>>,
+    state: Option<ResultStreamState<T>>,
     yielded: usize,
     error: Option<Error>, // TODO
-    retrieve_task: Option<JoinHandle<Result<BufferedLocatorStreamState<T>>>>,
+    retrieve_task: Option<JoinHandle<Result<ResultStreamState<T>>>>,
 }
 
-impl<T> BufferedLocatorStream<T>
+impl<T> ResultStream<T>
 where
-    T: SObjectRepresentation + Unpin,
+    T: SObjectCreation + Send + Sync + Unpin,
 {
     pub(crate) fn new(
-        initial_values: Option<BufferedLocatorStreamState<T>>,
-        manager: Box<dyn BufferedLocatorManager<Output = T>>,
+        initial_values: Option<ResultStreamState<T>>,
+        manager: Box<dyn ResultStreamManager<Output = T>>,
     ) -> Self {
-        BufferedLocatorStream {
+        ResultStream {
             manager,
             state: initial_values,
             retrieve_task: None,
@@ -102,9 +102,9 @@ where
     }
 }
 
-impl<T> Stream for BufferedLocatorStream<T>
+impl<T> Stream for ResultStream<T>
 where
-    T: SObjectRepresentation + Unpin,
+    T: SObjectCreation + Send + Sync + Unpin,
 {
     type Item = Result<T>;
 
