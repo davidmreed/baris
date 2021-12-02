@@ -36,16 +36,15 @@ impl DmlError {
     }
 }
 
-// TODO: review sObject Rows resources to see which really return this struct.
 #[derive(Debug, Deserialize)]
-pub struct DmlResultWithId {
+pub struct DmlResult {
     pub id: Option<SalesforceId>,
     pub created: Option<bool>,
     pub success: bool,
     pub errors: Vec<DmlError>,
 }
 
-impl Into<Result<Option<SalesforceId>>> for DmlResultWithId {
+impl Into<Result<Option<SalesforceId>>> for DmlResult {
     fn into(self) -> Result<Option<SalesforceId>> {
         if !self.success {
             if self.errors.len() > 0 {
@@ -61,7 +60,7 @@ impl Into<Result<Option<SalesforceId>>> for DmlResultWithId {
     }
 }
 
-impl Into<Result<()>> for DmlResultWithId {
+impl Into<Result<()>> for DmlResult {
     fn into(self) -> Result<()> {
         if !self.success {
             if self.errors.len() > 0 {
@@ -70,24 +69,6 @@ impl Into<Result<()>> for DmlResultWithId {
             } else {
                 Err(SalesforceError::UnknownError.into())
             }
-        } else {
-            Ok(())
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum DmlResult {
-    Success,
-    Error(DmlError),
-}
-
-// TODO: can we implement `Try` instead?
-impl Into<Result<()>> for DmlResult {
-    fn into(self) -> Result<()> {
-        if let DmlResult::Error(e) = self {
-            Err(e.into())
         } else {
             Ok(())
         }
