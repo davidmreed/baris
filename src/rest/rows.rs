@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use anyhow::Result;
 use async_trait::async_trait;
 use reqwest::Method;
+use serde_json::Map;
 use serde_json::Value;
 
 use crate::api::CompositeFriendlyRequest;
@@ -11,7 +12,7 @@ use crate::data::SObjectRepresentation;
 use crate::{Connection, SObjectType, SalesforceError, SalesforceId};
 
 use super::DmlError;
-use super::{DmlResult, DmlResultWithId};
+use super::DmlResult;
 
 // SObject class implementation
 
@@ -48,10 +49,19 @@ where
     }
 
     async fn upsert(&mut self, conn: &Connection, external_id: &str) -> Result<()> {
-        // TODO: ensure we set the Id field.
-        conn.execute(&SObjectUpsertRequest::new(self, external_id)?)
-            .await?
-            .into()
+        let result = conn
+            .execute(&SObjectUpsertRequest::new(self, external_id)?)
+            .await?;
+
+        if result.success {
+            // In version 46.0 and earlier, the `created` return value
+            // is not available for upsert requests.
+            if let Some(id) = result.id {
+                self.set_id(Some(id));
+            }
+        }
+
+        result.into()
     }
 
     async fn delete(&mut self, conn: &Connection) -> Result<()> {
@@ -100,7 +110,7 @@ impl<'a, T> SalesforceRequest for SObjectCreateRequest<'a, T>
 where
     T: SObjectRepresentation,
 {
-    type ReturnValue = DmlResultWithId;
+    type ReturnValue = DmlResult;
 
     fn get_body(&self) -> Option<Value> {
         self.sobject.to_value_with_options(false, false).ok()
@@ -154,7 +164,6 @@ where
     type ReturnValue = ();
 
     fn get_body(&self) -> Option<Value> {
-        println!("Update body: {}", self.sobject.to_value_with_options(false, false).unwrap());
         self.sobject.to_value_with_options(false, false).ok()
     }
 
@@ -183,9 +192,6 @@ where
 impl<'a, T> CompositeFriendlyRequest for SObjectUpdateRequest<'a, T> where T: SObjectRepresentation {}
 
 // SObject Upsert Requests
-// TODO: note unique return semantics at
-// https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/resources_composite_sobjects_collections_create.htm
-// There is an API version change around response struct and HTTP code.
 pub struct SObjectUpsertRequest<'a, T>
 where
     T: SObjectRepresentation,
@@ -315,6 +321,7 @@ where
 {
     id: SalesforceId,
     sobject_type: SObjectType,
+    fields: Option<Vec<String>>,
     phantom: PhantomData<T>,
 }
 
@@ -322,16 +329,20 @@ impl<T> SObjectRetrieveRequest<T>
 where
     T: SObjectRepresentation,
 {
-    pub fn new(id: SalesforceId, sobject_type: &SObjectType) -> SObjectRetrieveRequest<T> {
+    pub fn new(
+        id: SalesforceId,
+        sobject_type: &SObjectType,
+        fields: Option<Vec<String>>,
+    ) -> SObjectRetrieveRequest<T> {
         SObjectRetrieveRequest {
             id,
             sobject_type: sobject_type.clone(),
+            fields,
             phantom: PhantomData,
         }
     }
 }
 
-// TODO: support optional Fields query parameter
 impl<T> SalesforceRequest for SObjectRetrieveRequest<T>
 where
     T: SObjectRepresentation,
@@ -340,6 +351,26 @@ where
 
     fn get_url(&self) -> String {
         format!("sobjects/{}/{}/", self.sobject_type.get_api_name(), self.id)
+    }
+
+    fn get_query_parameters(&self) -> Option<Value> {
+        if let Some(fields) = self.fields {
+            let mut hm = Map::new();
+
+            hm.insert(
+                "fields".to_string(),
+                Value::Array(
+                    fields
+                        .iter()
+                        .map(|f| Value::String(f.to_string()))
+                        .collect(),
+                ),
+            );
+
+            Some(Value::Object(hm))
+        } else {
+            None
+        }
     }
 
     fn get_method(&self) -> Method {
