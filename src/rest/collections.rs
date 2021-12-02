@@ -7,9 +7,13 @@ use crate::{
 };
 
 use anyhow::Result;
+use async_stream::stream;
 use async_trait::async_trait;
+use futures::{Stream, StreamExt};
 use reqwest::Method;
 use serde_json::{json, Value};
+use tokio::{spawn, sync::mpsc};
+use tokio_stream::{iter, wrappers::ReceiverStream, StreamExt};
 
 use super::DmlResultWithId;
 
@@ -26,6 +30,92 @@ pub trait SObjectCollection {
         all_or_none: bool,
     ) -> Result<Vec<Result<()>>>;
     async fn delete(&mut self, conn: &Connection, all_or_none: bool) -> Result<Vec<Result<()>>>;
+}
+
+#[async_trait]
+pub trait SObjectStream<T> {
+    async fn create_all(
+        &mut self,
+        conn: &Connection,
+        batch_size: usize,
+        all_or_none: bool,
+        parallel: Option<usize>,
+    ) -> Result<Box<dyn Stream<Item = Result<T>>>>;
+}
+
+#[async_trait]
+impl<K, T> SObjectStream<T> for K
+where
+    K: Stream<Item = T> + Send,
+    T: SObjectRepresentation,
+{
+    async fn create_all(
+        &mut self,
+        conn: &Connection,
+        batch_size: usize,
+        all_or_none: bool,
+        parallel: Option<usize>,
+    ) -> Result<Box<dyn Stream<Item = Result<T>>>> {
+        // Desired behavior:
+        // We spawn a future for each chunk as it becomes available
+        // We immediately return a S tream that yields results in order
+        // as chunks complete.
+        // The Stream needs to be able to yield from a Stream of Futures
+        // that resolve to Result<Vec<Result>>
+        // and needs to know when it has all of the Futures
+
+        // We need to consume the source stream independently of the result
+        // stream being polled.
+        // `parallel` lets us control the degree of parallelism (and consequent memory usage)
+
+        if let Some(parallel) = parallel {
+            let (tx, rx) = mpsc::channel(parallel);
+            let conn = conn.clone();
+
+            spawn(async move {
+                self.chunks(batch_size).then(|c| {
+                    // For each chunk, spawn a new task to execute its creation,
+                    // and relay the handle for that task over our channel so the result
+                    // stream can await on it.
+
+                    let task_handle = spawn(async {
+                        // Perform the create operation,
+                        // and assemble a result set that includes the record data
+                        // (since our caller likely doesn't have it other
+                        // than the source stream).
+                        // Our result type will be Vec<Result<T>>
+                        let result = c.create(conn, all_or_none).await;
+
+                        if let Ok(results) = result {
+                            // The overall API call succeeded.
+                            // Generate a result vector
+                            results
+                                .iter()
+                                .enumerate()
+                                .map(|(i, r)| if let Ok(_) = r { Ok(results[i]) } else { r })
+                                .collect()
+                        } else {
+                            todo!()
+                        }
+                    });
+
+                    tx.send(task_handle)
+                })
+            });
+
+            let s = stream! {
+                while let Some(value) = rx.recv().await.await {
+                    // `value` is a Future resolving to a Vec<Result>
+                    for r in value.await? {
+                        yield r;
+                    }
+                }
+            };
+            Ok(Box::new(s))
+        } else {
+            todo!()
+        }
+    }
 }
 
 #[async_trait]

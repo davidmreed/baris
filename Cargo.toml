@@ -17,6 +17,7 @@ tokio-stream = "0.1"
 csv = "1.1"
 chrono = { version = "0.4", features = ["serde"]}
 async-trait = "0.1"
+async-stream = "0.3.2"
 futures = "0.3"
 itertools = "0.10"
 
