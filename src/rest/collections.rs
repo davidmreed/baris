@@ -302,7 +302,7 @@ where
 
     fn get_result(
         &self,
-        conn: &crate::Connection,
+        _conn: &crate::Connection,
         body: Option<&Value>,
     ) -> Result<Self::ReturnValue> {
         if let Some(body) = body {

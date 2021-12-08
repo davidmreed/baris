@@ -26,6 +26,7 @@ pub trait SObjectDML: Sized {
         conn: &Connection,
         sobject_type: &SObjectType,
         id: SalesforceId,
+        fields: Option<Vec<String>>
     ) -> Result<Self>;
 }
 
@@ -78,8 +79,9 @@ where
         conn: &Connection,
         sobject_type: &SObjectType,
         id: SalesforceId,
+        fields: Option<Vec<String>>
     ) -> Result<Self> {
-        conn.execute(&SObjectRetrieveRequest::new(id, sobject_type))
+        conn.execute(&SObjectRetrieveRequest::new(id, sobject_type, fields))
             .await
     }
 }
@@ -354,7 +356,7 @@ where
     }
 
     fn get_query_parameters(&self) -> Option<Value> {
-        if let Some(fields) = self.fields {
+        if let Some(fields) = &self.fields {
             let mut hm = Map::new();
 
             hm.insert(

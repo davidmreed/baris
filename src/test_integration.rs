@@ -80,8 +80,13 @@ async fn test_generic_sobject_rows() -> Result<()> {
     account.put("Name", FieldValue::String("Generic Test 2".to_owned()));
     account.update(&conn).await?;
 
-    let updated_account =
-        SObject::retrieve(&conn, &account_type, account.get_id().unwrap().to_owned()).await?;
+    let updated_account = SObject::retrieve(
+        &conn,
+        &account_type,
+        account.get_id().unwrap().to_owned(),
+        None,
+    )
+    .await?;
     assert_eq!(
         updated_account.get("Name").unwrap(),
         &FieldValue::String("Generic Test 2".to_owned())
@@ -125,8 +130,13 @@ async fn test_concrete_sobject_rows() -> Result<()> {
     account.name = "Concrete Test 2".to_owned();
     account.update(&conn).await?;
 
-    let updated_account =
-        Account::retrieve(&conn, &account_type, account.get_id().unwrap().to_owned()).await?;
+    let updated_account = Account::retrieve(
+        &conn,
+        &account_type,
+        account.get_id().unwrap().to_owned(),
+        None,
+    )
+    .await?;
     assert_eq!(updated_account.name, "Concrete Test 2");
 
     accounts[0].delete(&conn).await?;
