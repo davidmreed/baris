@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use reqwest::Method;
 use serde_json::{json, Map, Value};
-use tokio::{spawn, sync::mpsc};
+use tokio::{spawn, sync::mpsc, task::JoinHandle};
 
 use super::DmlResult;
 
@@ -43,6 +43,66 @@ pub trait SObjectStream<T> {
     ) -> Result<Box<dyn Stream<Item = Result<T>>>>;
 }
 
+async fn run_create<T>(
+    sobjects: T,
+    conn: Connection,
+    all_or_none: bool,
+) -> Result<Vec<Result<SalesforceId>>>
+where
+    T: SObjectCollection,
+{
+    // Perform the create operation,
+    // and assemble a result set that includes the record data
+    // (since our caller likely doesn't have it other
+    // than the source stream).
+    // Our result type will be Vec<Result<T>>
+    let result = sobjects.create(conn, all_or_none).await;
+
+    if let Ok(results) = result {
+        // The overall API call succeeded.
+        // Generate a result vector
+        results
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                if r.is_ok() {
+                    Ok(results[i].get_id().unwrap())
+                } else {
+                    Err(r.into())
+                }
+            })
+            .collect()
+    } else {
+        todo!()
+    }
+}
+
+async fn parallelize_creates<T, K>(
+    sobjects: T,
+    connection: Connection,
+    batch_size: usize,
+    all_or_none: bool,
+    parallel: usize,
+) -> mpsc::Receiver<JoinHandle<Result<Vec<Result<SalesforceId>>>>>
+where
+    T: Stream<Item = K>,
+    K: SObjectRepresentation,
+{
+    let (tx, rx) = mpsc::channel(parallel);
+    let conn = connection.clone();
+
+    sobjects.chunks(batch_size).then(|c| async move {
+        // For each chunk, spawn a new task to execute its creation,
+        // and relay the handle for that task over our channel so the result
+        // stream can await on it.
+
+        tx.send(spawn(run_create(c, conn.clone(), all_or_none)))
+            .await
+    });
+
+    rx
+}
+
 #[async_trait]
 impl<K, T> SObjectStream<T> for K
 where
@@ -58,7 +118,7 @@ where
     ) -> Result<Box<dyn Stream<Item = Result<T>>>> {
         // Desired behavior:
         // We spawn a future for each chunk as it becomes available
-        // We immediately return a S tream that yields results in order
+        // We immediately return a Stream that yields results in order
         // as chunks complete.
         // The Stream needs to be able to yield from a Stream of Futures
         // that resolve to Result<Vec<Result>>
@@ -73,12 +133,12 @@ where
             let conn = conn.clone();
 
             spawn(async move {
-                self.chunks(batch_size).then(|c| {
+                self.chunks(batch_size).then(|c| async move {
                     // For each chunk, spawn a new task to execute its creation,
                     // and relay the handle for that task over our channel so the result
                     // stream can await on it.
 
-                    let task_handle = spawn(async {
+                    let task_handle = spawn(async move {
                         // Perform the create operation,
                         // and assemble a result set that includes the record data
                         // (since our caller likely doesn't have it other
@@ -92,7 +152,13 @@ where
                             results
                                 .iter()
                                 .enumerate()
-                                .map(|(i, r)| if let Ok(_) = r { Ok(results[i]) } else { r })
+                                .map(|(i, r)| {
+                                    if r.is_ok() {
+                                        Ok(results[i])
+                                    } else {
+                                        Err(r.into())
+                                    }
+                                })
                                 .collect()
                         } else {
                             todo!()
@@ -104,7 +170,8 @@ where
             });
 
             let s = stream! {
-                while let Some(value) = rx.recv().await.await {
+                while let Some(value) = rx.recv() {
+                    let value = value.await?;
                     // `value` is a Future resolving to a Vec<Result>
                     for r in value.await? {
                         yield r;
