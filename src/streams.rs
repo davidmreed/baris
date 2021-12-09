@@ -21,10 +21,10 @@ pub fn value_from_csv(rec: &HashMap<String, String>, sobjecttype: &SObjectType) 
         if k != "attributes" {
             let describe = sobjecttype.get_describe().get_field(k).unwrap();
             let f = &FieldValue::from_str(rec.get(k).unwrap(), &describe.soap_type)?;
-            ret.insert(k.to_lowercase(), f.into());
+            // Use the field describe to canonicalize the case of the field.
+            ret.insert(describe.name.clone(), f.into());
         }
     }
-
     Ok(Value::Object(ret))
 }
 

@@ -3,12 +3,13 @@ use std::marker::PhantomData;
 use std::{collections::HashMap, ops::Deref, time::Duration};
 
 use anyhow::Result;
+use async_trait::async_trait;
 use serde_json::json;
 use std::collections::VecDeque;
 use tokio::task::{spawn, JoinHandle};
 use tokio::time::sleep;
 
-use crate::data::SObjectRepresentation;
+use crate::data::SObjectCreation;
 use crate::streams::value_from_csv;
 use crate::{
     data::DateTime,
@@ -17,6 +18,33 @@ use crate::{
 };
 
 const POLL_INTERVAL: u64 = 10;
+
+#[async_trait]
+pub trait BulkQueryable: SObjectCreation + Send + Sync + Unpin + 'static {
+    async fn bulk_query(
+        conn: &Connection,
+        sobject_type: &SObjectType,
+        query: &str,
+        all: bool,
+    ) -> Result<ResultStream<Self>> {
+        let job = BulkQueryJob::new(
+            &conn.clone(), // TODO: correct?
+            query,
+            if all {
+                BulkQueryOperation::QueryAll
+            } else {
+                BulkQueryOperation::Query
+            },
+        )
+        .await?;
+
+        job.complete(conn).await?; //TODO: handle returned error statuses.
+
+        Ok(job.get_results_stream(conn, sobject_type).await)
+    }
+}
+
+impl<T> BulkQueryable for T where T: SObjectCreation + Send + Sync + Unpin + 'static {}
 
 #[derive(Copy, Clone)]
 pub struct BulkQueryJob(SalesforceId);
@@ -97,7 +125,7 @@ pub struct BulkQueryJobDetail {
 
 const RESULTS_CHUNK_SIZE: u32 = 2000;
 
-struct BulkQueryLocatorManager<T: SObjectRepresentation> {
+struct BulkQueryLocatorManager<T: SObjectCreation> {
     job: BulkQueryJob,
     conn: Connection,
     sobject_type: SObjectType,
@@ -106,7 +134,7 @@ struct BulkQueryLocatorManager<T: SObjectRepresentation> {
 
 impl<T> ResultStreamManager for BulkQueryLocatorManager<T>
 where
-    T: SObjectRepresentation,
+    T: SObjectCreation + Send + Sync + 'static,
 {
     type Output = T;
 
@@ -189,7 +217,7 @@ impl BulkQueryJob {
         query: &str,
         operation: BulkQueryOperation,
     ) -> Result<Self> {
-        let url = conn.get_base_url().await?.join("/jobs/query")?;
+        let url = conn.get_base_url().await?.join("jobs/query")?;
 
         let result = conn
             .get_client()
@@ -200,7 +228,8 @@ impl BulkQueryJob {
                 "query": query,
             }))
             .send()
-            .await?; // TODO need to handle HTTP status here and elsewhere.
+            .await?
+            .error_for_status()?; // TODO need to handle HTTP status here and elsewhere.
 
         let val: BulkQueryJobDetail = result.json().await?;
 
@@ -215,7 +244,7 @@ impl BulkQueryJob {
         let url = conn
             .get_base_url()
             .await?
-            .join(&format!("/jobs/query/{}", self.0))?;
+            .join(&format!("jobs/query/{}", self.0))?;
 
         Ok(conn
             .get_client()
@@ -223,6 +252,7 @@ impl BulkQueryJob {
             .get(url)
             .send()
             .await?
+            .error_for_status()?
             .json()
             .await?)
     }
@@ -251,7 +281,7 @@ impl BulkQueryJob {
         sobject_type: &SObjectType,
     ) -> ResultStream<T>
     where
-        T: SObjectRepresentation + Unpin,
+        T: SObjectCreation + Unpin + Send + Sync,
     {
         ResultStream::new(
             None,

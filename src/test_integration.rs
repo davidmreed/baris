@@ -4,13 +4,14 @@ use itertools::Itertools;
 use reqwest::Url;
 use serde_derive::{Deserialize, Serialize};
 use std::env;
+use tokio_stream::StreamExt;
 
 use crate::data::SObjectRepresentation;
 use crate::rest::rows::SObjectDML;
 use crate::SalesforceId;
 use crate::{
-    auth::AccessTokenAuth, rest::collections::SObjectCollection, rest::query::Queryable,
-    Connection, FieldValue, SObject,
+    auth::AccessTokenAuth, bulk::v2::BulkQueryable, rest::collections::SObjectCollection,
+    rest::query::Queryable, Connection, FieldValue, SObject,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -167,5 +168,29 @@ async fn test_generic_collections_parallel() -> Result<()> {
     .into_iter()
     .flatten()
     .collect::<Result<Vec<()>>>()?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_bulk_query() -> Result<()> {
+    let mut conn = get_test_connection().expect("No connection present");
+    let account_type = conn.get_type("Account").await?;
+
+    let mut account = Account {
+        id: None,
+        name: "Bulk Query Test".to_owned(),
+    };
+
+    account.create(&conn).await?;
+
+    let mut stream =
+        Account::bulk_query(&conn, &account_type, "SELECT Id, Name FROM Account", false).await?;
+
+    while let Some(act) = stream.next().await {
+        println!("I found an Account with Id {}", act?.get_id().unwrap());
+    }
+
+    account.delete(&conn).await?;
+
     Ok(())
 }
