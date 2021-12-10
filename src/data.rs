@@ -391,6 +391,13 @@ pub trait SObjectRepresentation:
     fn get_api_name(&self) -> &str;
 }
 
+trait SingleTypedSObjectRepresentation: SObjectRepresentation {
+    fn get_type_api_name() -> &'static str;
+    fn get_api_name(&self) -> &str {
+        Self::get_type_api_name()
+    }
+}
+
 pub trait SObjectCreation
 where
     Self: Sized,

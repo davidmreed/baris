@@ -42,8 +42,10 @@ pub fn sobject_representation_derive(input: TokenStream) -> TokenStream {
             fn set_id(&mut self, id: Option<SalesforceId>) {
                 self.id = id;
             }
+        }
 
-            fn get_api_name(&self) -> &str {
+        impl SingleTypedSObjectRepresentation for #ident {
+            fn get_type_api_name(&self) -> &str {
                 #name
             }
         }
