@@ -1,12 +1,10 @@
 use anyhow::Result;
 
-use crate::data::traits::{SObjectDeserialization, SObjectWithId};
-use crate::rest::query::Queryable;
-use crate::rest::rows::SObjectDML;
+use crate::data::traits::SObjectWithId;
+use crate::rest::query::traits::Queryable;
+use crate::rest::rows::traits::SObjectDML;
 use crate::test_integration_base::{get_test_connection, Account};
 use crate::{FieldValue, SObject};
-
-use serde::Deserialize;
 
 #[tokio::test]
 #[ignore]
@@ -63,7 +61,6 @@ async fn test_generic_sobject_rows() -> Result<()> {
 #[ignore]
 async fn test_concrete_sobject_rows() -> Result<()> {
     let mut conn = get_test_connection().expect("No connection present");
-    let account_type = conn.get_type("Account").await?;
 
     let before_count = Account::count_query(
         &conn,
@@ -81,7 +78,6 @@ async fn test_concrete_sobject_rows() -> Result<()> {
 
     let mut accounts = Account::query_vec(
         &conn,
-        &account_type,
         "SELECT Id, Name FROM Account WHERE Name = 'Concrete Test'",
         false,
     )
@@ -93,13 +89,8 @@ async fn test_concrete_sobject_rows() -> Result<()> {
     account.name = "Concrete Test 2".to_owned();
     account.update(&conn).await?;
 
-    let updated_account = Account::retrieve(
-        &conn,
-        &account_type,
-        account.get_id().unwrap().to_owned(),
-        None,
-    )
-    .await?;
+    let updated_account =
+        Account::retrieve(&conn, account.get_id().unwrap().to_owned(), None).await?;
     assert_eq!(updated_account.name, "Concrete Test 2");
 
     accounts[0].delete(&conn).await?;

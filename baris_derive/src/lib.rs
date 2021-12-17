@@ -34,18 +34,18 @@ pub fn sobject_representation_derive(input: TokenStream) -> TokenStream {
     }
 
     let gen = quote! {
-        impl SObjectRepresentation for #ident {
-            fn get_id(&self) -> Option<SalesforceId> {
+        impl baris::data::traits::SObjectWithId for #ident {
+            fn get_id(&self) -> Option<baris::data::types::SalesforceId> {
                 self.id
             }
 
-            fn set_id(&mut self, id: Option<SalesforceId>) {
+            fn set_id(&mut self, id: Option<baris::data::types::SalesforceId>) {
                 self.id = id;
             }
         }
 
-        impl SingleTypedSObjectRepresentation for #ident {
-            fn get_type_api_name(&self) -> &str {
+        impl baris::data::traits::SingleTypedSObjectRepresentation for #ident {
+            fn get_type_api_name() -> &'static str {
                 #name
             }
         }

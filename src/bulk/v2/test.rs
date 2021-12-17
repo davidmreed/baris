@@ -1,17 +1,20 @@
-use anyhow::Result;
-use tokio_stream::StreamExt; // FIXME: why is this import required?
-
 use crate::{
-    bulk::v2::BulkQueryable,
-    rest::rows::SObjectDML,
+    bulk::v2::SingleTypeBulkQueryable,
+    data::traits::{
+        InstanceTypedSObjectRepresentation, SObjectDeserialization, SObjectRepresentation,
+        SObjectSerialization,
+    },
+    rest::rows::traits::SObjectDML,
     test_integration_base::{get_test_connection, Account},
 };
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use tokio_stream::StreamExt;
 
 #[tokio::test]
 #[ignore]
 async fn test_bulk_query() -> Result<()> {
     let mut conn = get_test_connection().expect("No connection present");
-    let account_type = conn.get_type("Account").await?;
 
     let mut account = Account {
         id: None,
@@ -20,8 +23,7 @@ async fn test_bulk_query() -> Result<()> {
 
     account.create(&conn).await?;
 
-    let mut stream =
-        Account::bulk_query(&conn, &account_type, "SELECT Id, Name FROM Account", false).await?;
+    let mut stream = Account::bulk_query(&conn, "SELECT Id, Name FROM Account", false).await?;
 
     while let Some(act) = stream.next().await {
         let act = act?;

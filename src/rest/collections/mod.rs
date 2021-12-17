@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 
 use super::DmlResult;
 
-mod traits;
+pub mod traits;
 
 #[cfg(test)]
 mod test;
