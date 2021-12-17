@@ -147,7 +147,7 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn get_type(&mut self, type_name: &str) -> Result<SObjectType> {
+    pub async fn get_type(&self, type_name: &str) -> Result<SObjectType> {
         let mut sobject_types = self.sobject_types.write().await;
 
         if !sobject_types.contains_key(type_name) {

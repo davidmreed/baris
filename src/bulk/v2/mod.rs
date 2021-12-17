@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 use tokio::task::{spawn, JoinHandle};
 use tokio::time::sleep;
 
-use crate::data::SObjectCreation;
+use crate::data::SObjectDeserialization;
 use crate::streams::value_from_csv;
 use crate::{
     data::DateTime,
@@ -23,7 +23,7 @@ mod test;
 const POLL_INTERVAL: u64 = 10;
 
 #[async_trait]
-pub trait BulkQueryable: SObjectCreation + Send + Sync + Unpin + 'static {
+pub trait BulkQueryable: SObjectDeserialization + Unpin {
     async fn bulk_query(
         conn: &Connection,
         sobject_type: &SObjectType,
@@ -47,7 +47,7 @@ pub trait BulkQueryable: SObjectCreation + Send + Sync + Unpin + 'static {
     }
 }
 
-impl<T> BulkQueryable for T where T: SObjectCreation + Send + Sync + Unpin + 'static {}
+impl<T> BulkQueryable for T where T: SObjectDeserialization + Unpin {}
 
 #[derive(Serialize, Deserialize, PartialEq)]
 pub enum BulkJobStatus {
@@ -117,7 +117,7 @@ pub struct BulkQueryJob {
 
 const RESULTS_CHUNK_SIZE: u32 = 2000;
 
-struct BulkQueryLocatorManager<T: SObjectCreation> {
+struct BulkQueryLocatorManager<T: SObjectDeserialization> {
     job_id: SalesforceId,
     conn: Connection,
     sobject_type: SObjectType,
@@ -126,7 +126,7 @@ struct BulkQueryLocatorManager<T: SObjectCreation> {
 
 impl<T> ResultStreamManager for BulkQueryLocatorManager<T>
 where
-    T: SObjectCreation + Send + Sync + 'static,
+    T: SObjectDeserialization + Send + Sync + 'static,
 {
     type Output = T;
 
@@ -267,7 +267,7 @@ impl BulkQueryJob {
         sobject_type: &SObjectType,
     ) -> ResultStream<T>
     where
-        T: SObjectCreation + Unpin + Send + Sync,
+        T: SObjectDeserialization + Unpin + Send + Sync,
     {
         ResultStream::new(
             None,

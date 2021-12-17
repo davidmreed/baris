@@ -1,10 +1,12 @@
 use anyhow::Result;
 
-use crate::data::SObjectRepresentation;
+use crate::data::traits::{SObjectDeserialization, SObjectWithId};
 use crate::rest::query::Queryable;
 use crate::rest::rows::SObjectDML;
 use crate::test_integration_base::{get_test_connection, Account};
 use crate::{FieldValue, SObject};
+
+use serde::Deserialize;
 
 #[tokio::test]
 #[ignore]

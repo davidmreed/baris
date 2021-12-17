@@ -3,7 +3,7 @@ use reqwest::Url;
 use serde_derive::{Deserialize, Serialize};
 use std::env;
 
-use crate::data::SObjectRepresentation;
+use crate::data::{SObjectWithId, SingleTypedSObjectRepresentation};
 use crate::SalesforceId;
 use crate::{auth::AccessTokenAuth, Connection};
 
@@ -27,7 +27,7 @@ pub struct Account {
     pub name: String,
 }
 
-impl SObjectRepresentation for Account {
+impl SObjectWithId for Account {
     fn get_id(&self) -> Option<SalesforceId> {
         self.id
     }
@@ -35,8 +35,10 @@ impl SObjectRepresentation for Account {
     fn set_id(&mut self, id: Option<SalesforceId>) {
         self.id = id;
     }
+}
 
-    fn get_api_name(&self) -> &str {
+impl SingleTypedSObjectRepresentation for Account {
+    fn get_type_api_name() -> &'static str {
         "Account"
     }
 }

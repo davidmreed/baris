@@ -3,7 +3,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 
 use crate::test_integration_base::get_test_connection;
-use crate::{rest::collections::SObjectCollection, SObject};
+use crate::{rest::collections::traits::SObjectCollection, SObject};
 
 #[tokio::test]
 #[ignore]

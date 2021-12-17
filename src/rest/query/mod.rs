@@ -10,7 +10,7 @@ use tokio_stream::StreamExt;
 
 use crate::{
     api::SalesforceRequest,
-    data::SObjectCreation,
+    data::{SObjectDeserialization, SingleTypedSObjectRepresentation},
     streams::{ResultStream, ResultStreamManager, ResultStreamState},
     Connection, SObjectType, SalesforceError,
 };
@@ -20,7 +20,7 @@ mod test;
 
 pub struct AggregateResult(Map<String, Value>);
 
-impl SObjectCreation for AggregateResult {
+impl SObjectDeserialization for AggregateResult {
     fn from_value(value: &Value, _sobjecttype: &SObjectType) -> Result<Self> {
         if let Value::Object(map) = value {
             Ok(AggregateResult { 0: map.clone() }) // TODO: don't clone.
@@ -31,7 +31,8 @@ impl SObjectCreation for AggregateResult {
 }
 
 #[async_trait]
-pub trait Queryable: SObjectCreation + Send + Sync + Unpin + 'static {
+pub trait Queryable: SObjectDeserialization + Unpin {
+    // TODO: is a default implementation here the right approach, or a blanket impl?
     async fn query(
         conn: &Connection,
         sobject_type: &SObjectType,
@@ -79,7 +80,52 @@ pub trait Queryable: SObjectCreation + Send + Sync + Unpin + 'static {
     }
 }
 
-impl<T> Queryable for T where T: SObjectCreation + Send + Sync + Unpin + 'static {}
+impl<T> Queryable for T where T: SObjectDeserialization + Unpin {}
+
+#[async_trait]
+pub trait QueryableSingleType:
+    SingleTypedSObjectRepresentation + SObjectDeserialization + Unpin
+{
+    async fn query(conn: &Connection, query: &str, all: bool) -> Result<ResultStream<Self>> {
+        let request = QueryRequest::new(query, all);
+
+        Ok(conn
+            .execute(&request)
+            .await?
+            .to_result_stream(conn, &conn.get_type(Self::get_type_api_name()).await?)?)
+    }
+
+    async fn aggregate_query(
+        conn: &Connection,
+        query: &str,
+        all: bool,
+    ) -> Result<ResultStream<AggregateResult>> {
+        let request = QueryRequest::new(query, all);
+
+        Ok(conn
+            .execute(&request)
+            .await?
+            .to_result_stream(conn, &conn.get_type(Self::get_type_api_name()).await?)?)
+    }
+
+    async fn count_query(conn: &Connection, query: &str, all: bool) -> Result<usize> {
+        let request = QueryRequest::new(query, all);
+
+        Ok(conn.execute(&request).await?.total_size)
+    }
+
+    async fn query_vec(conn: &Connection, query: &str, all: bool) -> Result<Vec<Self>> {
+        Ok(Self::query(conn, query, all)
+            .await?
+            .collect::<Result<Vec<Self>>>()
+            .await?)
+    }
+}
+
+impl<T> QueryableSingleType for T where
+    T: SingleTypedSObjectRepresentation + SObjectDeserialization + Unpin
+{
+}
 
 pub struct QueryRequest {
     query: String,
@@ -143,7 +189,7 @@ impl QueryResult {
         sobject_type: &SObjectType,
     ) -> Result<ResultStream<T>>
     where
-        T: SObjectCreation + Sync + Send + Unpin + 'static,
+        T: SObjectDeserialization + Sync + Send + Unpin + 'static,
     {
         Ok(ResultStream::new(
             Some(self.to_result_stream_state(sobject_type)?),
@@ -160,7 +206,7 @@ impl QueryResult {
         sobject_type: &SObjectType,
     ) -> Result<ResultStreamState<T>>
     where
-        T: SObjectCreation + Sync + Send + Unpin + 'static,
+        T: SObjectDeserialization + Sync + Send + Unpin + 'static,
     {
         Ok(ResultStreamState::new(
             self.records
@@ -174,7 +220,7 @@ impl QueryResult {
     }
 }
 
-struct QueryStreamLocatorManager<T: SObjectCreation + Unpin> {
+struct QueryStreamLocatorManager<T: SObjectDeserialization + Unpin> {
     conn: Connection,
     sobject_type: SObjectType,
     phantom: PhantomData<T>,
@@ -182,7 +228,7 @@ struct QueryStreamLocatorManager<T: SObjectCreation + Unpin> {
 
 impl<T> ResultStreamManager for QueryStreamLocatorManager<T>
 where
-    T: SObjectCreation + Unpin + Send + Sync + 'static, // TODO: why is this lifetime required?
+    T: SObjectDeserialization + Unpin, // TODO: why is this lifetime required?
 {
     type Output = T;
 
