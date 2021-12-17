@@ -13,6 +13,9 @@ use serde_json::{json, Map, Value};
 
 use super::DmlResult;
 
+#[cfg(test)]
+mod test;
+
 // Traits
 
 #[async_trait]

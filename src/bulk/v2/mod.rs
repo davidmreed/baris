@@ -1,7 +1,6 @@
 use serde_derive::{Deserialize, Serialize};
 use std::marker::PhantomData;
-use std::{collections::HashMap, ops::Deref, time::Duration};
-use tokio::sync::mpsc;
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -17,6 +16,9 @@ use crate::{
     streams::{ResultStream, ResultStreamManager, ResultStreamState},
     Connection, SObjectType, SalesforceError, SalesforceId,
 };
+
+#[cfg(test)]
+mod test;
 
 const POLL_INTERVAL: u64 = 10;
 

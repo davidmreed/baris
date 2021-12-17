@@ -12,7 +12,7 @@ pub mod bulk;
 pub mod rest;
 
 #[cfg(test)]
-mod test_integration;
+mod test_integration_base;
 
 extern crate chrono;
 extern crate csv;

@@ -1,54 +1,13 @@
 use anyhow::Result;
-use futures::future::join_all;
-use itertools::Itertools;
-use reqwest::Url;
-use serde_derive::{Deserialize, Serialize};
-use std::env;
-use tokio_stream::StreamExt;
 
 use crate::data::SObjectRepresentation;
+use crate::rest::query::Queryable;
 use crate::rest::rows::SObjectDML;
-use crate::SalesforceId;
-use crate::{
-    auth::AccessTokenAuth, bulk::v2::BulkQueryable, rest::collections::SObjectCollection,
-    rest::query::Queryable, Connection, FieldValue, SObject,
-};
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct Account {
-    pub id: Option<SalesforceId>,
-    pub name: String,
-}
-
-impl SObjectRepresentation for Account {
-    fn get_id(&self) -> Option<SalesforceId> {
-        self.id
-    }
-
-    fn set_id(&mut self, id: Option<SalesforceId>) {
-        self.id = id;
-    }
-
-    fn get_api_name(&self) -> &str {
-        "Account"
-    }
-}
-
-fn get_test_connection() -> Result<Connection> {
-    let access_token = env::var("SESSION_ID")?;
-    let instance_url = env::var("INSTANCE_URL")?;
-
-    Connection::new(
-        Box::new(AccessTokenAuth::new(
-            access_token,
-            Url::parse(&instance_url)?,
-        )),
-        "v52.0",
-    )
-}
+use crate::test_integration_base::{get_test_connection, Account};
+use crate::{FieldValue, SObject};
 
 #[tokio::test]
+#[ignore]
 async fn test_generic_sobject_rows() -> Result<()> {
     let mut conn = get_test_connection().expect("No connection present");
     let account_type = conn.get_type("Account").await?;
@@ -99,6 +58,7 @@ async fn test_generic_sobject_rows() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_concrete_sobject_rows() -> Result<()> {
     let mut conn = get_test_connection().expect("No connection present");
     let account_type = conn.get_type("Account").await?;
@@ -141,56 +101,6 @@ async fn test_concrete_sobject_rows() -> Result<()> {
     assert_eq!(updated_account.name, "Concrete Test 2");
 
     accounts[0].delete(&conn).await?;
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_generic_collections_parallel() -> Result<()> {
-    let mut conn = get_test_connection()?;
-    let account_type = conn.get_type("Account").await?;
-
-    let mut sobject_chunks: Vec<Vec<SObject>> = (0..1000)
-        .map(|i| SObject::new(&account_type).with_string("Name", format!("Account {}", i)))
-        .chunks(200)
-        .into_iter()
-        .map(|v| v.collect::<Vec<SObject>>())
-        .collect();
-
-    join_all(
-        sobject_chunks
-            .iter_mut()
-            .map(|v| v.create(conn.clone(), true)),
-    )
-    .await
-    .into_iter()
-    .collect::<Result<Vec<Vec<Result<()>>>>>()?
-    .into_iter()
-    .flatten()
-    .collect::<Result<Vec<()>>>()?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_bulk_query() -> Result<()> {
-    let mut conn = get_test_connection().expect("No connection present");
-    let account_type = conn.get_type("Account").await?;
-
-    let mut account = Account {
-        id: None,
-        name: "Bulk Query Test".to_owned(),
-    };
-
-    account.create(&conn).await?;
-
-    let mut stream =
-        Account::bulk_query(&conn, &account_type, "SELECT Id, Name FROM Account", false).await?;
-
-    while let Some(act) = stream.next().await {
-        println!("I found an Account with Id {}", act?.get_id().unwrap());
-    }
-
-    account.delete(&conn).await?;
 
     Ok(())
 }

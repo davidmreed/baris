@@ -18,6 +18,9 @@ use reqwest::{header, Client, Method, RequestBuilder, StatusCode, Url};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
+#[cfg(test)]
+mod test;
+
 pub trait SalesforceRequest {
     type ReturnValue;
 

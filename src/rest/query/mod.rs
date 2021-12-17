@@ -15,6 +15,9 @@ use crate::{
     Connection, SObjectType, SalesforceError,
 };
 
+#[cfg(test)]
+mod test;
+
 pub struct AggregateResult(Map<String, Value>);
 
 impl SObjectCreation for AggregateResult {

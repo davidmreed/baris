@@ -10,6 +10,9 @@ use crate::{
     Connection, SalesforceError,
 };
 
+#[cfg(test)]
+mod test;
+
 pub struct CompositeRequest {
     // TODO: make this struct directly serialize.
     // TODO: use builder pattern.

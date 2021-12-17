@@ -5,6 +5,9 @@ use serde_derive::Deserialize;
 
 use crate::SalesforceError;
 
+#[cfg(test)]
+mod test;
+
 #[async_trait]
 pub trait Authentication: Send + Sync {
     async fn refresh_access_token(&mut self) -> Result<()>;
@@ -157,6 +160,7 @@ impl Authentication for UsernamePasswordAuth {
             .build()?
             .post(url)
             .form(&[
+                // TODO: make this into a struct
                 ("client_id", &self.app.consumer_key),
                 ("client_secret", &self.app.client_secret),
                 ("grant_type", &"password".to_string()),
@@ -167,7 +171,7 @@ impl Authentication for UsernamePasswordAuth {
             .await?
             .error_for_status()?
             .json()
-            .await?;
+            .await?; // TODO: is there a 200-with-error-body case?
 
         self.access_token = Some(result.access_token);
         self.instance_url = Url::parse(&result.instance_url)?;

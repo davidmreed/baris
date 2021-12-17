@@ -14,7 +14,8 @@ use crate::{Connection, SObjectType, SalesforceError, SalesforceId};
 use super::DmlError;
 use super::DmlResult;
 
-// SObject class implementation
+#[cfg(test)]
+mod test;
 
 #[async_trait]
 pub trait SObjectDML: Sized {
@@ -26,7 +27,7 @@ pub trait SObjectDML: Sized {
         conn: &Connection,
         sobject_type: &SObjectType,
         id: SalesforceId,
-        fields: Option<Vec<String>>
+        fields: Option<Vec<String>>,
     ) -> Result<Self>;
 }
 
@@ -79,7 +80,7 @@ where
         conn: &Connection,
         sobject_type: &SObjectType,
         id: SalesforceId,
-        fields: Option<Vec<String>>
+        fields: Option<Vec<String>>,
     ) -> Result<Self> {
         conn.execute(&SObjectRetrieveRequest::new(id, sobject_type, fields))
             .await

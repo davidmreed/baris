@@ -7,7 +7,8 @@ use serde_json::Value;
 
 use crate::{api::SalesforceRequest, data::SoapType, Connection, SalesforceError, SalesforceId};
 
-// SObject Describe Requests
+#[cfg(test)]
+mod test;
 
 pub struct SObjectDescribeRequest {
     sobject: String,
