@@ -8,8 +8,8 @@ use anyhow::{Error, Result};
 use serde_json::{json, Value};
 
 use super::{
-    types::*, InstanceTypedSObjectRepresentation, SObjectDeserialization, SObjectSerialization,
-    SObjectWithId,
+    types::*, DynamicallyTypedSObject, SObjectDeserialization, SObjectSerialization, SObjectWithId,
+    TypedSObject,
 };
 use crate::errors::SalesforceError;
 use crate::rest::describe::SObjectDescribe;
@@ -305,8 +305,14 @@ impl SObjectWithId for SObject {
     }
 }
 
-impl InstanceTypedSObjectRepresentation for SObject {
+impl TypedSObject for SObject {
     fn get_api_name(&self) -> &str {
+        &self.sobject_type.api_name
+    }
+}
+
+impl DynamicallyTypedSObject for SObject {
+    fn get_instance_api_name(&self) -> &str {
         &self.sobject_type.api_name
     }
 }

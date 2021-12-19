@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use tokio_stream::StreamExt;
 
 use crate::{
-    data::{SObjectDeserialization, SingleTypedSObjectRepresentation},
+    data::{DynamicallyTypedSObject, SObjectDeserialization, SingleTypedSObject},
     streams::ResultStream,
     Connection, SObjectType,
 };
@@ -11,7 +11,7 @@ use crate::{
 use super::{AggregateResult, QueryRequest};
 
 #[async_trait]
-pub trait Queryable: SObjectDeserialization + Unpin {
+pub trait Queryable: DynamicallyTypedSObject + SObjectDeserialization + Unpin {
     // TODO: is a default implementation here the right approach, or a blanket impl?
     async fn query(
         conn: &Connection,
@@ -60,12 +60,10 @@ pub trait Queryable: SObjectDeserialization + Unpin {
     }
 }
 
-impl<T> Queryable for T where T: SObjectDeserialization + Unpin {}
+impl<T> Queryable for T where T: DynamicallyTypedSObject + SObjectDeserialization + Unpin {}
 
 #[async_trait]
-pub trait QueryableSingleType:
-    SingleTypedSObjectRepresentation + SObjectDeserialization + Unpin
-{
+pub trait QueryableSingleType: SingleTypedSObject + SObjectDeserialization + Unpin {
     async fn query(conn: &Connection, query: &str, all: bool) -> Result<ResultStream<Self>> {
         let request = QueryRequest::new(query, all);
 
@@ -102,7 +100,4 @@ pub trait QueryableSingleType:
     }
 }
 
-impl<T> QueryableSingleType for T where
-    T: SingleTypedSObjectRepresentation + SObjectDeserialization + Unpin
-{
-}
+impl<T> QueryableSingleType for T where T: SingleTypedSObject + SObjectDeserialization + Unpin {}

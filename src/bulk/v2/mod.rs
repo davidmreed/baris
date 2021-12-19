@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 use tokio::task::{spawn, JoinHandle};
 use tokio::time::sleep;
 
-use crate::data::{SObjectDeserialization, SingleTypedSObjectRepresentation};
+use crate::data::{SObjectDeserialization, SingleTypedSObject};
 use crate::streams::value_from_csv;
 use crate::{
     data::DateTime,
@@ -50,9 +50,7 @@ pub trait BulkQueryable: SObjectDeserialization + Unpin {
 impl<T> BulkQueryable for T where T: SObjectDeserialization + Unpin {}
 
 #[async_trait]
-pub trait SingleTypeBulkQueryable:
-    SingleTypedSObjectRepresentation + SObjectDeserialization + Unpin
-{
+pub trait SingleTypeBulkQueryable: SingleTypedSObject + SObjectDeserialization + Unpin {
     async fn bulk_query(conn: &Connection, query: &str, all: bool) -> Result<ResultStream<Self>> {
         let job = BulkQueryJob::new(
             &conn.clone(), // TODO: correct?
@@ -73,10 +71,7 @@ pub trait SingleTypeBulkQueryable:
     }
 }
 
-impl<T> SingleTypeBulkQueryable for T where
-    T: SingleTypedSObjectRepresentation + SObjectDeserialization + Unpin
-{
-}
+impl<T> SingleTypeBulkQueryable for T where T: SingleTypedSObject + SObjectDeserialization + Unpin {}
 
 #[derive(Serialize, Deserialize, PartialEq)]
 pub enum BulkJobStatus {

@@ -1,15 +1,15 @@
 use anyhow::Result;
 
-use crate::data::traits::SObjectWithId;
-use crate::rest::query::traits::Queryable;
-use crate::rest::rows::traits::SObjectDML;
+use crate::data::traits::*;
+use crate::rest::query::traits::*;
+use crate::rest::rows::traits::*;
 use crate::test_integration_base::{get_test_connection, Account};
 use crate::{FieldValue, SObject};
 
 #[tokio::test]
 #[ignore]
 async fn test_generic_sobject_rows() -> Result<()> {
-    let mut conn = get_test_connection().expect("No connection present");
+    let conn = get_test_connection().expect("No connection present");
     let account_type = conn.get_type("Account").await?;
 
     let before_count = SObject::count_query(
@@ -60,7 +60,7 @@ async fn test_generic_sobject_rows() -> Result<()> {
 #[tokio::test]
 #[ignore]
 async fn test_concrete_sobject_rows() -> Result<()> {
-    let mut conn = get_test_connection().expect("No connection present");
+    let conn = get_test_connection().expect("No connection present");
 
     let before_count = Account::count_query(
         &conn,
@@ -89,8 +89,13 @@ async fn test_concrete_sobject_rows() -> Result<()> {
     account.name = "Concrete Test 2".to_owned();
     account.update(&conn).await?;
 
-    let updated_account =
-        Account::retrieve(&conn, account.get_id().unwrap().to_owned(), None).await?;
+    let updated_account = Account::retrieve(
+        &conn,
+        &conn.get_type(Account::get_type_api_name()).await?,
+        account.get_id().unwrap().to_owned(),
+        None,
+    )
+    .await?;
     assert_eq!(updated_account.name, "Concrete Test 2");
 
     accounts[0].delete(&conn).await?;

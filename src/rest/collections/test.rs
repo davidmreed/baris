@@ -8,7 +8,7 @@ use crate::{rest::collections::traits::SObjectCollection, SObject};
 #[tokio::test]
 #[ignore]
 async fn test_generic_collections_parallel() -> Result<()> {
-    let mut conn = get_test_connection()?;
+    let conn = get_test_connection()?;
     let account_type = conn.get_type("Account").await?;
 
     let mut sobject_chunks: Vec<Vec<SObject>> = (0..1000)

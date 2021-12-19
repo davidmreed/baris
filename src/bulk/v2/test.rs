@@ -1,20 +1,15 @@
 use crate::{
     bulk::v2::SingleTypeBulkQueryable,
-    data::traits::{
-        InstanceTypedSObjectRepresentation, SObjectDeserialization, SObjectRepresentation,
-        SObjectSerialization,
-    },
     rest::rows::traits::SObjectDML,
     test_integration_base::{get_test_connection, Account},
 };
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
 
 #[tokio::test]
 #[ignore]
 async fn test_bulk_query() -> Result<()> {
-    let mut conn = get_test_connection().expect("No connection present");
+    let conn = get_test_connection().expect("No connection present");
 
     let mut account = Account {
         id: None,
