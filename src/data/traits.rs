@@ -53,11 +53,18 @@ pub trait SingleTypedSObject: TypedSObject {
     fn get_type_api_name() -> &'static str;
 }
 
+impl<T> TypedSObject for T
+where
+    T: SingleTypedSObject,
+{
+    fn get_api_name(&self) -> &str {
+        Self::get_type_api_name()
+    }
+}
+
 /// Represents an SObject where every instance of the struct may have
 /// a different SObject type.
-pub trait DynamicallyTypedSObject: TypedSObject {
-    fn get_instance_api_name(&self) -> &str;
-}
+pub trait DynamicallyTypedSObject: TypedSObject {}
 
 /// Represents an SObject that can be deserialized from an API response.
 /// A blanket implementation is provided for any struct that implements

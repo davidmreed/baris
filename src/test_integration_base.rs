@@ -37,12 +37,6 @@ impl SObjectWithId for Account {
     }
 }
 
-impl TypedSObject for Account {
-    fn get_api_name(&self) -> &str {
-        Self::get_type_api_name()
-    }
-}
-
 impl SingleTypedSObject for Account {
     fn get_type_api_name() -> &'static str {
         "Account"

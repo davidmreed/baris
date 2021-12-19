@@ -311,11 +311,7 @@ impl TypedSObject for SObject {
     }
 }
 
-impl DynamicallyTypedSObject for SObject {
-    fn get_instance_api_name(&self) -> &str {
-        &self.sobject_type.api_name
-    }
-}
+impl DynamicallyTypedSObject for SObject {}
 
 impl SObjectSerialization for SObject {
     fn to_value(&self) -> Result<serde_json::Value> {
