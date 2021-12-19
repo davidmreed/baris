@@ -89,13 +89,8 @@ async fn test_concrete_sobject_rows() -> Result<()> {
     account.name = "Concrete Test 2".to_owned();
     account.update(&conn).await?;
 
-    let updated_account = Account::retrieve(
-        &conn,
-        &conn.get_type(Account::get_type_api_name()).await?,
-        account.get_id().unwrap().to_owned(),
-        None,
-    )
-    .await?;
+    let updated_account =
+        Account::retrieve(&conn, account.get_id().unwrap().to_owned(), None).await?;
     assert_eq!(updated_account.name, "Concrete Test 2");
 
     accounts[0].delete(&conn).await?;

@@ -3,7 +3,9 @@ use futures::future::join_all;
 use itertools::Itertools;
 
 use crate::test_integration_base::get_test_connection;
-use crate::{rest::collections::traits::SObjectCollection, SObject};
+use crate::SObject;
+
+use super::traits::SObjectCollectionDynamicallyTyped;
 
 #[tokio::test]
 #[ignore]

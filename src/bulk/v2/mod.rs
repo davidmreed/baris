@@ -3,7 +3,6 @@ use std::marker::PhantomData;
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::Result;
-use async_trait::async_trait;
 use serde_json::json;
 use std::collections::VecDeque;
 use tokio::task::{spawn, JoinHandle};
@@ -17,61 +16,12 @@ use crate::{
     Connection, SObjectType, SalesforceError, SalesforceId,
 };
 
+mod traits;
+
 #[cfg(test)]
 mod test;
 
 const POLL_INTERVAL: u64 = 10;
-
-#[async_trait]
-pub trait BulkQueryable: SObjectDeserialization + Unpin {
-    async fn bulk_query(
-        conn: &Connection,
-        sobject_type: &SObjectType,
-        query: &str,
-        all: bool,
-    ) -> Result<ResultStream<Self>> {
-        let job = BulkQueryJob::new(
-            &conn.clone(), // TODO: correct?
-            query,
-            if all {
-                BulkQueryOperation::QueryAll
-            } else {
-                BulkQueryOperation::Query
-            },
-        )
-        .await?;
-
-        let job = job.complete(conn).await?; //TODO: handle returned error statuses.
-
-        Ok(job.get_results_stream(conn, sobject_type).await)
-    }
-}
-
-impl<T> BulkQueryable for T where T: SObjectDeserialization + Unpin {}
-
-#[async_trait]
-pub trait SingleTypeBulkQueryable: SingleTypedSObject + SObjectDeserialization + Unpin {
-    async fn bulk_query(conn: &Connection, query: &str, all: bool) -> Result<ResultStream<Self>> {
-        let job = BulkQueryJob::new(
-            &conn.clone(), // TODO: correct?
-            query,
-            if all {
-                BulkQueryOperation::QueryAll
-            } else {
-                BulkQueryOperation::Query
-            },
-        )
-        .await?;
-
-        let job = job.complete(conn).await?; //TODO: handle returned error statuses.
-
-        Ok(job
-            .get_results_stream(conn, &conn.get_type(Self::get_type_api_name()).await?)
-            .await)
-    }
-}
-
-impl<T> SingleTypeBulkQueryable for T where T: SingleTypedSObject + SObjectDeserialization + Unpin {}
 
 #[derive(Serialize, Deserialize, PartialEq)]
 pub enum BulkJobStatus {

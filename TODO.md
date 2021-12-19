@@ -9,9 +9,11 @@ MVP
 
 - We should implement sObject Collections DML on collections other than Vecs, as well as iterators and streams.
 - Add support for nested sObjects
-- Break requirement to have reference-counted SObjectType objects.
-  - Remove from Query methods
-  - Add SingleTypedSobject trait
+- Add support for Blobs and geolocations
+- Add support for Bulk DML
+- Docs
+- Tests
+- Review and narrow trait bounds
 
 Next
 
