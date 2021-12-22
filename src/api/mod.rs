@@ -14,7 +14,8 @@ use crate::auth::Authentication;
 use crate::rest::describe::{SObjectDescribe, SObjectDescribeRequest};
 
 use anyhow::{Error, Result};
-use reqwest::{header, Client, Method, RequestBuilder, StatusCode, Url};
+use async_trait::async_trait;
+use reqwest::{header, Client, Method, RequestBuilder, Response, StatusCode, Url};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
@@ -36,6 +37,65 @@ pub trait SalesforceRequest {
     }
 
     fn get_result(&self, conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue>;
+}
+
+struct RawRequest<T>(T)
+where
+    T: SalesforceRequest;
+
+impl<T> From<T> for RawRequest<T>
+where
+    T: SalesforceRequest,
+{
+    fn from(src: T) -> RawRequest<T> {
+        RawRequest { 0: src }
+    }
+}
+
+#[async_trait]
+impl<T> SalesforceRawRequest for RawRequest<T>
+where
+    T: SalesforceRequest,
+{
+    type ReturnValue = T::ReturnValue;
+
+    fn get_url(&self) -> String {
+        self.0.get_url()
+    }
+
+    fn get_method(&self) -> Method {
+        self.0.get_method()
+    }
+
+    async fn get_result(&self, conn: &Connection, response: Response) -> Result<Self::ReturnValue> {
+        self.0.get_result(conn, response.json().await?)
+    }
+
+    fn get_body(&self) -> Option<Value> {
+        self.0.get_body()
+    }
+
+    fn get_query_parameters(&self) -> Option<Value> {
+        self.0.get_query_parameters()
+    }
+}
+
+#[async_trait]
+trait SalesforceRawRequest {
+    type ReturnValue;
+
+    fn get_body(&self) -> Option<Value> {
+        None
+    }
+
+    fn get_url(&self) -> String;
+    fn get_method(&self) -> Method;
+
+    fn get_query_parameters(&self) -> Option<Value> {
+        None
+    }
+
+    async fn get_result(&self, conn: &Connection, response: Response) -> Result<Self::ReturnValue>;
 }
 
 pub trait CompositeFriendlyRequest: SalesforceRequest {}
@@ -171,6 +231,7 @@ impl Connection {
     }
 
     pub async fn get_client(&self) -> Result<Client> {
+        // TODO: it is more efficient to cache the client for connection pooling.
         let mut headers = header::HeaderMap::new();
 
         headers.insert(
@@ -186,7 +247,6 @@ impl Connection {
         K: SalesforceRequest,
     {
         let url = self.get_base_url().await?.join(&request.get_url())?;
-        println!("I have URL {}", url);
 
         let mut builder = self.get_client().await?.request(request.get_method(), url);
 
@@ -205,11 +265,11 @@ impl Connection {
         Ok(builder)
     }
 
-    pub async fn execute<K, T>(&self, request: &K) -> Result<T>
+    pub(crate) async fn execute_raw<K, T>(&self, request: &K) -> Response
     where
-        K: SalesforceRequest<ReturnValue = T>,
+        K: SalesforceRawRequest<ReturnValue = T>,
     {
-        let mut result = self.build_request(request).await?.send().await?;
+        let mut result = request.build().await?.send().await?;
 
         // If the token is expired, refresh it and try again.
         if result.status().as_u16() == 401 {
@@ -217,7 +277,14 @@ impl Connection {
             result = self.build_request(request).await?.send().await?
         }
 
-        let result = result.error_for_status()?;
+        result
+    }
+
+    pub async fn execute<K, T>(&self, request: &K) -> Result<T>
+    where
+        K: SalesforceRequest<ReturnValue = T>,
+    {
+        let result = self.execute_raw(request.into()).await;
 
         if result.status() == StatusCode::NO_CONTENT {
             Ok(request.get_result(&self, None)?)

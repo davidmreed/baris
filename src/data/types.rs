@@ -1,5 +1,5 @@
 use std::{
-    convert::{TryFrom, TryInto},
+    convert::{Infallible, TryFrom, TryInto},
     fmt::{self, Display},
     ops::Deref,
     str::FromStr,
@@ -7,10 +7,11 @@ use std::{
 
 use anyhow::Result;
 use chrono::{TimeZone, Utc};
+use futures::Stream;
 use serde::{Serialize, Serializer};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::SalesforceError;
+use crate::{Connection, SalesforceError};
 
 #[derive(Serialize, Deserialize, Copy, Clone, PartialEq)]
 #[serde(try_from = "String")]
@@ -19,11 +20,11 @@ pub struct SalesforceId {
     id: [u8; 18],
 }
 
-// TODO: store as 15-char and render as 18 on string conversion.
-// OR store as 18 (because the API always returns 18) and
-// don't verify on 18-character input.
-// Add crate-private method to create from API result, unchecked
 impl SalesforceId {
+    pub(crate) fn new_unchecked(id: &str) -> SalesforceId {
+        todo!()
+    }
+
     pub fn new(id: &str) -> Result<SalesforceId, SalesforceError> {
         const ALNUMS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
 
@@ -257,8 +258,46 @@ impl FromStr for Date {
     }
 }
 
-// TODO: add field type for Geolocation
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(try_from = "String")]
+#[serde(into = "String")]
+pub struct Blob(String);
 
+impl Blob {
+    pub async fn stream(&self, conn: &Connection) -> impl Stream<Item = Result<Bytes>> {
+        conn.get_client().await?.get(self.0).await?.bytes_stream()
+    }
+}
+
+impl Display for Blob {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl TryFrom<&str> for Blob {
+    type Error = Infallible;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(Blob {
+            0: value.to_string(),
+        })
+    }
+}
+
+impl FromStr for Blob {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Infallible> {
+        s.try_into()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub struct Geolocation {
+    pub latitude: f64,
+    pub longitude: f64,
+}
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Address {
@@ -294,6 +333,8 @@ pub enum SoapType {
     Id,
     #[serde(rename = "xsd:int")]
     Integer,
+    #[serde(rename = "urn:location")]
+    Geolocation,
     #[serde(rename = "xsd:string")]
     String,
     #[serde(rename = "xsd:time")]

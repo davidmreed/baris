@@ -17,6 +17,7 @@ MVP
 
 Next
 
+- Add tracing
 - Add builder for queries
 - Implement Index and IndexMut for SObject
 - Add parallelized get-whole-describe method

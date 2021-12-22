@@ -81,6 +81,7 @@ pub enum FieldValue {
     Id(SalesforceId),
     Relationship(SObject),
     Blob(String), // TODO: implement Blobs
+    Geolocation(Geolocation),
     Null,
     // TODO: implement reference parameters
 }
@@ -193,6 +194,7 @@ impl From<&FieldValue> for serde_json::Value {
             FieldValue::Address(address) => serde_json::to_value(address).unwrap(), // This should be infallible
             FieldValue::Relationship(_) => todo!(),
             FieldValue::Blob(_) => todo!(),
+            FieldValue::Geolocation(g) => serde_json::to_value(g).unwrap(), // This should be infallible
         }
     }
 }
@@ -221,9 +223,12 @@ impl FieldValue {
             FieldValue::Date(i) => i.to_string(),
             FieldValue::Id(i) => i.to_string(),
             FieldValue::Null => "".to_string(),
-            FieldValue::Address(_) => todo!(),
+            FieldValue::Address(_) => panic!("Address fields cannot be rendered as strings."),
             FieldValue::Relationship(_) => todo!(),
             FieldValue::Blob(_) => todo!(),
+            FieldValue::Geolocation(_) => {
+                panic!("Geolocation fields cannot be rendered as strings.")
+            }
         }
     }
 
@@ -233,47 +238,27 @@ impl FieldValue {
         }
 
         match soap_type {
-            // TODO
-            SoapType::Address | SoapType::Any | SoapType::Blob => panic!("Not supported"),
+            // TODO: Make these not clone.
+            SoapType::Any | SoapType::Blob => panic!("Not supported"),
+            SoapType::Address => {
+                FieldValue::Address(serde_json::from_value::<Address>(value.clone())?)
+            }
             SoapType::Boolean => {
-                if let serde_json::Value::Bool(b) = value {
-                    return Ok(FieldValue::Boolean(*b));
-                }
+                FieldValue::Boolean(serde_json::from_value::<bool>(value.clone())?)
             }
-            SoapType::Date => {
-                if let serde_json::Value::String(b) = value {
-                    return Ok(FieldValue::Date(b.parse()?));
-                }
-            }
+            SoapType::Date => FieldValue::Date(serde_json::from_value::<Date>(value.clone())?),
             SoapType::DateTime => {
-                if let serde_json::Value::String(b) = value {
-                    return Ok(FieldValue::DateTime(b.parse()?));
-                }
+                FieldValue::DateTime(serde_json::from_value::<DateTime>(value.clone())?)
             }
-            SoapType::Time => {
-                if let serde_json::Value::String(b) = value {
-                    return Ok(FieldValue::Time(b.parse()?));
-                }
-            }
-            SoapType::Double => {
-                if let serde_json::Value::Number(b) = value {
-                    return Ok(FieldValue::Double(b.as_f64().unwrap()));
-                }
-            }
-            SoapType::Integer => {
-                if let serde_json::Value::Number(b) = value {
-                    return Ok(FieldValue::Integer(b.as_i64().unwrap()));
-                }
-            }
-            SoapType::Id => {
-                if let serde_json::Value::String(b) = value {
-                    return Ok(FieldValue::Id(SalesforceId::new(b)?));
-                }
-            }
+            SoapType::Time => FieldValue::Time(serde_json::from_value::<Time>(value.clone())?),
+            SoapType::Double => FieldValue::Double(serde_json::from_value::<f64>(value.clone())?),
+            SoapType::Integer => FieldValue::Integer(serde_json::from_value::<i64>(value.clone())?),
+            SoapType::Id => FieldValue::Id(serde_json::from_value::<SalesforceId>(value.clone())?),
             SoapType::String => {
-                if let serde_json::Value::String(b) = value {
-                    return Ok(FieldValue::String(b.to_string()));
-                }
+                FieldValue::String(serde_json::from_value::<String>(value.clone())?)
+            }
+            SoapType::Geolocation => {
+                FieldValue::Geolocation(serde_json::from_value::<Geolocation>(value.clone())?)
             }
         }
 
