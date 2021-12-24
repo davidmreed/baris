@@ -1,6 +1,5 @@
 MVP
 
-- Get sObject describes only at need
 - Implement JWT auth
 - Resolve connection-as-ref or not in parameters.
 
@@ -17,6 +16,7 @@ MVP
 
 Next
 
+- Get sObject describes only at need
 - Add tracing
 - Add builder for queries
 - Implement Index and IndexMut for SObject

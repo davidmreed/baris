@@ -239,30 +239,41 @@ impl FieldValue {
 
         match soap_type {
             // TODO: Make these not clone.
-            SoapType::Any | SoapType::Blob => panic!("Not supported"),
-            SoapType::Address => {
-                FieldValue::Address(serde_json::from_value::<Address>(value.clone())?)
-            }
-            SoapType::Boolean => {
-                FieldValue::Boolean(serde_json::from_value::<bool>(value.clone())?)
-            }
-            SoapType::Date => FieldValue::Date(serde_json::from_value::<Date>(value.clone())?),
-            SoapType::DateTime => {
-                FieldValue::DateTime(serde_json::from_value::<DateTime>(value.clone())?)
-            }
-            SoapType::Time => FieldValue::Time(serde_json::from_value::<Time>(value.clone())?),
-            SoapType::Double => FieldValue::Double(serde_json::from_value::<f64>(value.clone())?),
-            SoapType::Integer => FieldValue::Integer(serde_json::from_value::<i64>(value.clone())?),
-            SoapType::Id => FieldValue::Id(serde_json::from_value::<SalesforceId>(value.clone())?),
-            SoapType::String => {
-                FieldValue::String(serde_json::from_value::<String>(value.clone())?)
-            }
-            SoapType::Geolocation => {
-                FieldValue::Geolocation(serde_json::from_value::<Geolocation>(value.clone())?)
-            }
+            SoapType::Any | SoapType::Blob => Err(SalesforceError::SchemaError(
+                "Unable to convert value from JSON".to_string(),
+            )
+            .into()),
+            SoapType::Address => Ok(FieldValue::Address(serde_json::from_value::<Address>(
+                value.clone(),
+            )?)),
+            SoapType::Boolean => Ok(FieldValue::Boolean(serde_json::from_value::<bool>(
+                value.clone(),
+            )?)),
+            SoapType::Date => Ok(FieldValue::Date(serde_json::from_value::<Date>(
+                value.clone(),
+            )?)),
+            SoapType::DateTime => Ok(FieldValue::DateTime(serde_json::from_value::<DateTime>(
+                value.clone(),
+            )?)),
+            SoapType::Time => Ok(FieldValue::Time(serde_json::from_value::<Time>(
+                value.clone(),
+            )?)),
+            SoapType::Double => Ok(FieldValue::Double(serde_json::from_value::<f64>(
+                value.clone(),
+            )?)),
+            SoapType::Integer => Ok(FieldValue::Integer(serde_json::from_value::<i64>(
+                value.clone(),
+            )?)),
+            SoapType::Id => Ok(FieldValue::Id(serde_json::from_value::<SalesforceId>(
+                value.clone(),
+            )?)),
+            SoapType::String => Ok(FieldValue::String(serde_json::from_value::<String>(
+                value.clone(),
+            )?)),
+            SoapType::Geolocation => Ok(FieldValue::Geolocation(serde_json::from_value::<
+                Geolocation,
+            >(value.clone())?)),
         }
-
-        Err(SalesforceError::SchemaError("Unable to convert value from JSON".to_string()).into())
     }
 }
 

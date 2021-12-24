@@ -39,49 +39,8 @@ pub trait SalesforceRequest {
     fn get_result(&self, conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue>;
 }
 
-struct RawRequest<T>(T)
-where
-    T: SalesforceRequest;
-
-impl<T> From<T> for RawRequest<T>
-where
-    T: SalesforceRequest,
-{
-    fn from(src: T) -> RawRequest<T> {
-        RawRequest { 0: src }
-    }
-}
-
 #[async_trait]
-impl<T> SalesforceRawRequest for RawRequest<T>
-where
-    T: SalesforceRequest,
-{
-    type ReturnValue = T::ReturnValue;
-
-    fn get_url(&self) -> String {
-        self.0.get_url()
-    }
-
-    fn get_method(&self) -> Method {
-        self.0.get_method()
-    }
-
-    async fn get_result(&self, conn: &Connection, response: Response) -> Result<Self::ReturnValue> {
-        self.0.get_result(conn, response.json().await?)
-    }
-
-    fn get_body(&self) -> Option<Value> {
-        self.0.get_body()
-    }
-
-    fn get_query_parameters(&self) -> Option<Value> {
-        self.0.get_query_parameters()
-    }
-}
-
-#[async_trait]
-trait SalesforceRawRequest {
+pub(crate) trait SalesforceRawRequest {
     type ReturnValue;
 
     fn get_body(&self) -> Option<Value> {
@@ -265,26 +224,59 @@ impl Connection {
         Ok(builder)
     }
 
-    pub(crate) async fn execute_raw<K, T>(&self, request: &K) -> Response
+    // The following violates DRY but is challenging to express due to the two-trait structure.
+    // TODO: figure out how to do a blanket impl of SalesforceRawRequest for SalesforceRequest
+    // without impacting the external-facing API.
+
+    async fn build_raw_request<K>(&self, request: &K) -> Result<RequestBuilder>
+    where
+        K: SalesforceRawRequest,
+    {
+        let url = self.get_base_url().await?.join(&request.get_url())?;
+
+        let mut builder = self.get_client().await?.request(request.get_method(), url);
+
+        let method = request.get_method();
+
+        if method == Method::POST || method == Method::PUT || method == Method::PATCH {
+            if let Some(body) = request.get_body() {
+                builder = builder.json(&body);
+            }
+        }
+
+        if let Some(params) = request.get_query_parameters() {
+            builder = builder.query(&params);
+        }
+
+        Ok(builder)
+    }
+
+    pub(crate) async fn execute_raw_request<K, T>(&self, request: &K) -> Result<T>
     where
         K: SalesforceRawRequest<ReturnValue = T>,
     {
-        let mut result = request.build().await?.send().await?;
+        let mut result = self.build_raw_request(request).await?.send().await?;
 
         // If the token is expired, refresh it and try again.
         if result.status().as_u16() == 401 {
             self.refresh_access_token().await?;
-            result = self.build_request(request).await?.send().await?
+            result = self.build_raw_request(request).await?.send().await?
         }
 
-        result
+        request.get_result(self, result).await
     }
 
     pub async fn execute<K, T>(&self, request: &K) -> Result<T>
     where
         K: SalesforceRequest<ReturnValue = T>,
     {
-        let result = self.execute_raw(request.into()).await;
+        let mut result = self.build_request(request).await?.send().await?;
+
+        // If the token is expired, refresh it and try again.
+        if result.status().as_u16() == 401 {
+            self.refresh_access_token().await?;
+            result = self.build_request(request).await?.send().await?
+        }
 
         if result.status() == StatusCode::NO_CONTENT {
             Ok(request.get_result(&self, None)?)

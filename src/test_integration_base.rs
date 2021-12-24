@@ -3,7 +3,7 @@ use reqwest::Url;
 use serde_derive::{Deserialize, Serialize};
 use std::env;
 
-use crate::data::{SObjectWithId, SingleTypedSObject, TypedSObject};
+use crate::data::{SObjectWithId, SingleTypedSObject};
 use crate::SalesforceId;
 use crate::{auth::AccessTokenAuth, Connection};
 

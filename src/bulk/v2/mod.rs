@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use tokio::task::{spawn, JoinHandle};
 use tokio::time::sleep;
 
-use crate::data::{SObjectDeserialization, SingleTypedSObject};
+use crate::data::SObjectDeserialization;
 use crate::streams::value_from_csv;
 use crate::{
     data::DateTime,

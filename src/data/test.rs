@@ -92,3 +92,7 @@ fn test_dates_serialize() -> Result<()> {
 
 #[test]
 fn test_times() {}
+
+#[tokio::test]
+#[ignore]
+async fn test_blob_retrieve() {}

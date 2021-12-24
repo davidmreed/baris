@@ -1,11 +1,16 @@
 use std::marker::PhantomData;
 
 use anyhow::Result;
+use async_trait::async_trait;
+use bytes::Bytes;
+use futures::Stream;
 use reqwest::Method;
+use reqwest::Response;
 use serde_json::Map;
 use serde_json::Value;
 
 use crate::api::CompositeFriendlyRequest;
+use crate::api::SalesforceRawRequest;
 use crate::api::SalesforceRequest;
 use crate::data::SObjectRepresentation;
 use crate::{Connection, SObjectType, SalesforceError, SalesforceId};
@@ -321,3 +326,34 @@ where
 }
 
 impl<T> CompositeFriendlyRequest for SObjectRetrieveRequest<T> where T: SObjectRepresentation {}
+
+pub struct BlobRetrieveRequest {
+    path: String,
+}
+
+impl BlobRetrieveRequest {
+    pub fn new(path: String) -> BlobRetrieveRequest {
+        BlobRetrieveRequest { path }
+    }
+}
+
+#[async_trait]
+impl SalesforceRawRequest for BlobRetrieveRequest {
+    type ReturnValue = Box<dyn Stream<Item = Result<Bytes, reqwest::Error>>>;
+
+    fn get_url(&self) -> String {
+        self.path.clone()
+    }
+
+    fn get_method(&self) -> Method {
+        Method::GET
+    }
+
+    async fn get_result(
+        &self,
+        _conn: &Connection,
+        response: Response,
+    ) -> Result<Self::ReturnValue> {
+        Ok(Box::new(response.bytes_stream()))
+    }
+}

@@ -13,6 +13,9 @@ use tokio_stream::Stream;
 
 use crate::{data::SObjectDeserialization, FieldValue, SObjectType};
 
+#[cfg(test)]
+mod test;
+
 pub fn value_from_csv(rec: &HashMap<String, String>, sobjecttype: &SObjectType) -> Result<Value> {
     let mut ret = Map::new();
 

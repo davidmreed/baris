@@ -6,12 +6,13 @@ use std::{
 };
 
 use anyhow::Result;
+use bytes::Bytes;
 use chrono::{TimeZone, Utc};
 use futures::Stream;
 use serde::{Serialize, Serializer};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{Connection, SalesforceError};
+use crate::{rest::rows::BlobRetrieveRequest, Connection, SalesforceError};
 
 #[derive(Serialize, Deserialize, Copy, Clone, PartialEq)]
 #[serde(try_from = "String")]
@@ -35,6 +36,7 @@ impl SalesforceId {
         let mut full_id: [u8; 18] = [0; 18];
         let mut bitstring: usize = 0;
 
+        // TODO: this might panic if `id` is valid UTF-8 but not a valid Id.
         for (i, c) in id[..15].chars().enumerate() {
             if c.is_ascii_alphanumeric() {
                 if c.is_ascii_uppercase() {
@@ -258,14 +260,20 @@ impl FromStr for Date {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Deserialize)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
 pub struct Blob(String);
 
+// TODO: can we elide the reqwest reference in our public API via a stream adapter?
 impl Blob {
-    pub async fn stream(&self, conn: &Connection) -> impl Stream<Item = Result<Bytes>> {
-        conn.get_client().await?.get(self.0).await?.bytes_stream()
+    pub async fn stream(
+        &self,
+        conn: &Connection,
+    ) -> Result<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>>>> {
+        Ok(conn
+            .execute_raw_request(&BlobRetrieveRequest::new(self.0.clone()))
+            .await?)
     }
 }
 
@@ -275,21 +283,11 @@ impl Display for Blob {
     }
 }
 
-impl TryFrom<&str> for Blob {
+impl TryFrom<String> for Blob {
     type Error = Infallible;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Ok(Blob {
-            0: value.to_string(),
-        })
-    }
-}
-
-impl FromStr for Blob {
-    type Err = Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Infallible> {
-        s.try_into()
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Ok(Blob { 0: value })
     }
 }
 
