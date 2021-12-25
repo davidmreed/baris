@@ -1,4 +1,11 @@
 use anyhow::Result;
+use bytes::{BufMut, BytesMut};
+use futures::StreamExt;
+
+use crate::{
+    rest::{collections::traits::SObjectCollectionDynamicallyTyped, query::traits::Queryable},
+    test_integration_base::get_test_connection,
+};
 
 use super::*;
 
@@ -95,4 +102,39 @@ fn test_times() {}
 
 #[tokio::test]
 #[ignore]
-async fn test_blob_retrieve() {}
+async fn test_blob_retrieve() -> Result<()> {
+    // TODO: when blob DML is implemented, rebuild this test to not use Anonymous Apex
+    let conn = get_test_connection()?;
+
+    conn.execute_anonymous(
+        "insert new ContentVersion(Title = 'Bar', PathOnClient = 'Test.txt', VersionData = Blob.valueOf('Foo'));".to_owned(),
+    )
+    .await?;
+
+    let mut sobjects = SObject::query_vec(
+        &conn,
+        &conn.get_type("ContentVersion").await?,
+        "SELECT Id, VersionData FROM ContentVersion LIMIT 1",
+        false,
+    )
+    .await?;
+
+    let content = sobjects[0].get("VersionData").unwrap();
+
+    if let FieldValue::Blob(b) = content {
+        let mut stream = b.stream(&conn).await?;
+        let mut result = BytesMut::with_capacity(32);
+
+        while let Some(chunk) = stream.next().await {
+            result.put(&chunk?[..]);
+        }
+
+        assert_eq!(b"Foo", &result[..]);
+    } else {
+        panic!("Wrong type returned")
+    }
+
+    sobjects.delete(&conn, false).await?;
+
+    Ok(())
+}

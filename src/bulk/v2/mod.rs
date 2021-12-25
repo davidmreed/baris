@@ -64,7 +64,8 @@ pub enum BulkApiColumnDelimiter {
 
 #[derive(Serialize, Deserialize, PartialEq)]
 pub enum BulkApiConcurrencyMode {
-    Parallel, // This type uses uppercase
+    // This type uses uppercase, so no serde-renaming required.
+    Parallel,
 }
 
 #[derive(Serialize, Deserialize, PartialEq)]
@@ -136,6 +137,7 @@ where
                 .send()
                 .await?
                 .error_for_status()?;
+            // TODO: make request struct
 
             let headers = result.headers();
 
@@ -198,7 +200,7 @@ impl BulkQueryJob {
             .error_for_status()?
             .json()
             .await?)
-        // TODO: handle token refresh.
+        // TODO: handle token refresh - this should be a Request struct
     }
 
     pub async fn abort(&self, _conn: &Connection) -> Result<()> {
@@ -220,6 +222,7 @@ impl BulkQueryJob {
             .error_for_status()?
             .json()
             .await?)
+        // TODO: make Request struct
     }
 
     pub async fn complete(self, conn: &Connection) -> Result<BulkQueryJob> {

@@ -2,6 +2,7 @@ use std::{
     convert::{Infallible, TryFrom, TryInto},
     fmt::{self, Display},
     ops::Deref,
+    pin::Pin,
     str::FromStr,
 };
 
@@ -270,7 +271,7 @@ impl Blob {
     pub async fn stream(
         &self,
         conn: &Connection,
-    ) -> Result<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>>>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>>>>> {
         Ok(conn
             .execute_raw_request(&BlobRetrieveRequest::new(self.0.clone()))
             .await?)
@@ -317,7 +318,7 @@ pub enum SoapType {
     Address,
     #[serde(rename = "xsd:anyType")]
     Any,
-    #[serde(rename = "xsd:base64binary")]
+    #[serde(rename = "xsd:base64Binary")]
     Blob,
     #[serde(rename = "xsd:boolean")]
     Boolean,

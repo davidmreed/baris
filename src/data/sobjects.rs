@@ -80,7 +80,7 @@ pub enum FieldValue {
     Date(Date),
     Id(SalesforceId),
     Relationship(SObject),
-    Blob(String), // TODO: implement Blobs
+    Blob(Blob),
     Geolocation(Geolocation),
     Null,
     // TODO: implement reference parameters
@@ -239,11 +239,14 @@ impl FieldValue {
 
         match soap_type {
             // TODO: Make these not clone.
-            SoapType::Any | SoapType::Blob => Err(SalesforceError::SchemaError(
+            SoapType::Any => Err(SalesforceError::SchemaError(
                 "Unable to convert value from JSON".to_string(),
             )
             .into()),
             SoapType::Address => Ok(FieldValue::Address(serde_json::from_value::<Address>(
+                value.clone(),
+            )?)),
+            SoapType::Blob => Ok(FieldValue::Blob(serde_json::from_value::<Blob>(
                 value.clone(),
             )?)),
             SoapType::Boolean => Ok(FieldValue::Boolean(serde_json::from_value::<bool>(

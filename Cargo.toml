@@ -3,6 +3,12 @@ name = "baris"
 version = "0.1.0"
 authors = ["David Reed <david@ktema.org>"]
 edition = "2021"
+license = "BSD-2-Clause"
+description = "Async Salesforce API interactions"
+readme = "README.md"
+homepage = "https://github.com/davidmreed/baris"
+repository = "https://github.com/davidmreed/baris"
+keywords = ["salesforce"]
 
 [dependencies]
 reqwest = {version = "0.11", features = ["json", "stream"]}

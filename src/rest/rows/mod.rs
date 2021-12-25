@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::pin::Pin;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -339,7 +340,7 @@ impl BlobRetrieveRequest {
 
 #[async_trait]
 impl SalesforceRawRequest for BlobRetrieveRequest {
-    type ReturnValue = Box<dyn Stream<Item = Result<Bytes, reqwest::Error>>>;
+    type ReturnValue = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>>>>;
 
     fn get_url(&self) -> String {
         self.path.clone()
@@ -354,6 +355,6 @@ impl SalesforceRawRequest for BlobRetrieveRequest {
         _conn: &Connection,
         response: Response,
     ) -> Result<Self::ReturnValue> {
-        Ok(Box::new(response.bytes_stream()))
+        Ok(Box::pin(response.bytes_stream()))
     }
 }

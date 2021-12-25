@@ -7,6 +7,7 @@ use crate::{
 };
 
 use anyhow::Result;
+use itertools::Itertools;
 use reqwest::Method;
 use serde_json::{json, Map, Value};
 
@@ -343,10 +344,12 @@ where
         // Will not panic by implementation of new().
         hm.insert(
             "ids".to_string(),
-            self.objects
-                .iter()
-                .map(|o| o.get_id().unwrap().to_string())
-                .collect(),
+            Value::String(
+                self.objects
+                    .iter()
+                    .map(|o| o.get_id().unwrap().to_string())
+                    .join(","),
+            ),
         );
         hm.insert("allOrNone".to_string(), Value::Bool(self.all_or_none));
 
