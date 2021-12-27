@@ -83,7 +83,7 @@ pub enum FieldValue {
     Blob(Blob),
     Geolocation(Geolocation),
     Null,
-    // TODO: implement reference parameters
+    CompositeReference(String),
 }
 
 impl FieldValue {
@@ -195,6 +195,7 @@ impl From<&FieldValue> for serde_json::Value {
             FieldValue::Relationship(_) => todo!(),
             FieldValue::Blob(_) => todo!(),
             FieldValue::Geolocation(g) => serde_json::to_value(g).unwrap(), // This should be infallible
+            FieldValue::CompositeReference(s) => serde_json::Value::String(s.clone()),
         }
     }
 }
@@ -229,6 +230,7 @@ impl FieldValue {
             FieldValue::Geolocation(_) => {
                 panic!("Geolocation fields cannot be rendered as strings.")
             }
+            FieldValue::CompositeReference(i) => i.clone(),
         }
     }
 
@@ -448,6 +450,16 @@ impl SObject {
     }
 
     // TODO: Blob, Geolocation
+
+    pub fn with_composite_reference(mut self, key: &str, value: &str) -> SObject {
+        self.put(key, FieldValue::CompositeReference(value.to_owned()));
+        self
+    }
+
+    pub fn with_geolocation(mut self, key: &str, value: Geolocation) -> SObject {
+        self.put(key, FieldValue::Geolocation(value));
+        self
+    }
 
     pub fn with_null(mut self, key: &str) -> SObject {
         self.put(key, FieldValue::Null);

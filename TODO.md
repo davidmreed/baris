@@ -1,13 +1,15 @@
 Cactusforce
 
-- Implement JWT auth
 - Add support for Bulk DML
-- [Ideal] We should implement sObject Collections DML on collections other than Vecs, as well as iterators and streams.
+- Implement MVP Composite
 - Open source
 - Queries with bad fields are not currently having errors handled.
+- [Ideal] We should implement sObject Collections DML on collections other than Vecs, as well as iterators and streams.
+- [Ideal] Build prelude
 
 MVP
 
+- Implement JWT auth
 - Resolve connection-as-ref or not in parameters.
 
   - Parallelization militates for using clone() explicitly in the parameters.

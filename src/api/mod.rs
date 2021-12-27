@@ -108,9 +108,13 @@ impl Connection {
         let lock = self.auth.read().await;
 
         Ok(lock
-            .get_instance_url() // TODO: this is why the refresh is in this mehtod (above )
+            .get_instance_url() // TODO: this is why the refresh is in this method (above )
             .await?
-            .join(&format!("/services/data/{}/", self.api_version))?)
+            .join(&self.get_base_url_path())?)
+    }
+
+    pub fn get_base_url_path(&self) -> String {
+        format!("/services/data/{}/", self.api_version)
     }
 
     pub async fn get_access_token(&self) -> Result<String> {
@@ -262,6 +266,7 @@ impl Connection {
             self.refresh_access_token().await?;
             result = self.build_raw_request(request).await?.send().await?
         }
+        result = result.error_for_status()?;
 
         request.get_result(self, result).await
     }
@@ -277,6 +282,9 @@ impl Connection {
             self.refresh_access_token().await?;
             result = self.build_request(request).await?.send().await?
         }
+
+        // TODO: we don't consume any error details returned in the case of a 400.
+        result = result.error_for_status()?;
 
         if result.status() == StatusCode::NO_CONTENT {
             Ok(request.get_result(&self, None)?)

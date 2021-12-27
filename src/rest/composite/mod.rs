@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use reqwest::Method;
-use serde_derive::Serialize;
+use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
@@ -10,27 +10,32 @@ use crate::{
     Connection, SalesforceError,
 };
 
+use super::ApiError;
+
 #[cfg(test)]
 mod test;
 
 pub struct CompositeRequest {
-    // TODO: make this struct directly serialize.
     // TODO: use builder pattern.
     keys: Vec<String>,
     requests: HashMap<String, CompositeSubrequest>,
-    results: HashMap<String, Value>,
     all_or_none: Option<bool>, // TODO: Option<Option<bool>>, to allow them to be unspecified?
     collate_subrequests: Option<bool>,
+    base_url: String,
 }
 
 impl CompositeRequest {
-    pub fn new(all_or_none: Option<bool>, collate_subrequests: Option<bool>) -> CompositeRequest {
+    pub fn new(
+        base_url: String,
+        all_or_none: Option<bool>,
+        collate_subrequests: Option<bool>,
+    ) -> CompositeRequest {
         CompositeRequest {
             requests: HashMap::new(),
-            results: HashMap::new(),
             keys: Vec::new(),
             all_or_none,
             collate_subrequests,
+            base_url,
         }
     }
 
@@ -40,7 +45,7 @@ impl CompositeRequest {
         self.requests.insert(
             key.to_string(),
             CompositeSubrequest {
-                url: req.get_url(),
+                url: format!("{}{}", self.base_url, req.get_url()),
                 body: req.get_body(),
                 method: req.get_method().to_string(),
                 reference_id: Some(key.to_string()),
@@ -48,30 +53,10 @@ impl CompositeRequest {
             },
         );
     }
-
-    pub fn get_result_value(&self, key: &str) -> Option<&Value> {
-        self.results.get(key)
-    }
-
-    pub fn get_result<K, T>(&self, conn: &Connection, key: &str, req: &K) -> Result<T>
-    where
-        K: SalesforceRequest<ReturnValue = T>,
-    {
-        // TODO: what does the response body look like for a composite request that includes a 204-result subrequest?
-        req.get_result(
-            conn,
-            Some(
-                self.get_result_value(key)
-                    .ok_or(SalesforceError::GeneralError(
-                        "Key does not exist".to_string(),
-                    ))?,
-            ),
-        )
-    }
 }
 
 impl SalesforceRequest for CompositeRequest {
-    type ReturnValue = Value;
+    type ReturnValue = CompositeResponse;
 
     fn get_url(&self) -> String {
         "composite".to_string()
@@ -85,12 +70,12 @@ impl SalesforceRequest for CompositeRequest {
         let mut body = CompositeRequestBody {
             all_or_none: self.all_or_none,
             collate_subrequests: self.collate_subrequests,
-            composite_requests: Vec::with_capacity(self.keys.len()),
+            composite_request: Vec::with_capacity(self.keys.len()),
         };
 
         for k in self.keys.iter() {
             let req = self.requests.get(k).unwrap();
-            body.composite_requests.push(req.clone()); // TODO: don't clone.
+            body.composite_request.push(req.clone()); // TODO: don't clone.
         }
 
         serde_json::to_value(body).ok()
@@ -98,7 +83,7 @@ impl SalesforceRequest for CompositeRequest {
 
     fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
         if let Some(body) = body {
-            Ok(body.clone()) // TODO: don't clone
+            Ok(serde_json::from_value(body.clone())?) // TODO: don't clone
         } else {
             Err(SalesforceError::ResponseBodyExpected.into())
         }
@@ -110,7 +95,7 @@ impl SalesforceRequest for CompositeRequest {
 struct CompositeRequestBody {
     all_or_none: Option<bool>,
     collate_subrequests: Option<bool>,
-    composite_requests: Vec<CompositeSubrequest>,
+    composite_request: Vec<CompositeSubrequest>,
 }
 
 #[derive(Serialize, Clone)]
@@ -121,4 +106,65 @@ struct CompositeSubrequest {
     body: Option<Value>,
     reference_id: Option<String>,
     http_headers: Option<HashMap<String, String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompositeResponse {
+    pub composite_response: Vec<CompositeSubrequestResponse>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum CompositeSubrequestResponseBody {
+    Error(Vec<ApiError>),
+    Success(Option<Value>),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompositeSubrequestResponse {
+    body: CompositeSubrequestResponseBody,
+    http_headers: HashMap<String, String>,
+    http_status_code: u16,
+    reference_id: String,
+}
+
+impl CompositeResponse {
+    pub fn get_result_value(&self, key: &str) -> Option<&CompositeSubrequestResponse> {
+        // TODO: cache a HashMap
+        let matches: Vec<&CompositeSubrequestResponse> = self
+            .composite_response
+            .iter()
+            .filter(|s| s.reference_id == key)
+            .collect();
+
+        if matches.len() > 0 {
+            Some(matches[0])
+        } else {
+            None
+        }
+    }
+
+    pub fn get_result<K, T>(&self, conn: &Connection, key: &str, req: &K) -> Result<T>
+    where
+        K: SalesforceRequest<ReturnValue = T>,
+    {
+        let subrequest_response =
+            self.get_result_value(key)
+                .ok_or(SalesforceError::GeneralError(
+                    "Subrequest key does not exist".into(),
+                ))?;
+
+        match &subrequest_response.body {
+            // TODO: handle multiple errors returned.
+            CompositeSubrequestResponseBody::Error(errs) => Err(errs[0].clone().into()),
+            CompositeSubrequestResponseBody::Success(Some(body)) => {
+                req.get_result(conn, Some(&body))
+            }
+            CompositeSubrequestResponseBody::Success(None) => req.get_result(conn, None),
+        }
+
+        // TODO: what does the response body look like for a composite request that includes a 201-result subrequest?
+    }
 }

@@ -23,10 +23,6 @@ pub struct SalesforceId {
 }
 
 impl SalesforceId {
-    pub(crate) fn new_unchecked(id: &str) -> SalesforceId {
-        todo!()
-    }
-
     pub fn new(id: &str) -> Result<SalesforceId, SalesforceError> {
         const ALNUMS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
 
@@ -94,7 +90,7 @@ impl From<SalesforceId> for String {
 }
 
 #[derive(Debug, PartialEq, Clone, Deserialize)]
-#[serde(try_from = "&str")]
+#[serde(try_from = "String")]
 pub struct DateTime(chrono::DateTime<chrono::Utc>);
 
 impl DateTime {
@@ -124,15 +120,15 @@ impl Deref for DateTime {
     }
 }
 
-impl TryFrom<&str> for DateTime {
+impl TryFrom<String> for DateTime {
     type Error = anyhow::Error;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    fn try_from(value: String) -> Result<Self, Self::Error> {
         // Salesforce's version of RFC3339 doesn't include a colon as required by the standard,
         // giving +0000 instead of the expected +00:00
 
         Ok(DateTime {
-            0: chrono::DateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.3f%z")?
+            0: chrono::DateTime::parse_from_str(&value, "%Y-%m-%dT%H:%M:%S%.3f%z")?
                 .with_timezone(&Utc),
         })
     }
@@ -152,10 +148,11 @@ impl FromStr for DateTime {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        s.try_into()
+        s.to_owned().try_into()
     }
 }
 
+// TODO: can we handle this with a Serde attribute like SalesforceId?
 impl Serialize for DateTime {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -166,7 +163,7 @@ impl Serialize for DateTime {
 }
 
 #[derive(Debug, PartialEq, Clone, Deserialize)]
-#[serde(try_from = "&str")]
+#[serde(try_from = "String")]
 pub struct Time(chrono::NaiveTime);
 
 impl Time {
@@ -185,12 +182,12 @@ impl Deref for Time {
     }
 }
 
-impl TryFrom<&str> for Time {
+impl TryFrom<String> for Time {
     type Error = anyhow::Error;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    fn try_from(value: String) -> Result<Self, Self::Error> {
         Ok(Time {
-            0: chrono::NaiveTime::parse_from_str(value, "%H:%M:%S%.3fZ")?,
+            0: chrono::NaiveTime::parse_from_str(&value, "%H:%M:%S%.3fZ")?,
         })
     }
 }
@@ -205,10 +202,11 @@ impl FromStr for Time {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        s.try_into()
+        s.to_owned().try_into()
     }
 }
 
+// TODO: Serde attribute instead?
 impl Serialize for Time {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -237,12 +235,12 @@ impl Deref for Date {
     }
 }
 
-impl TryFrom<&str> for Date {
+impl TryFrom<String> for Date {
     type Error = anyhow::Error;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    fn try_from(value: String) -> Result<Self, Self::Error> {
         Ok(Date {
-            0: chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")?,
+            0: chrono::NaiveDate::parse_from_str(&value, "%Y-%m-%d")?,
         })
     }
 }
@@ -257,7 +255,7 @@ impl FromStr for Date {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        s.try_into()
+        s.to_owned().try_into()
     }
 }
 
