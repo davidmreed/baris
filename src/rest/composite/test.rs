@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::rest::rows::traits::{SObjectDML, SObjectDynamicallyTypedRetrieval};
-use crate::rest::rows::SObjectCreateRequest;
+use crate::rest::rows::{SObjectCreateRequest, SObjectDeleteRequest, SObjectUpdateRequest};
 use crate::test_integration_base::get_test_connection;
 use crate::SObject;
 
@@ -9,7 +9,7 @@ use super::CompositeRequest;
 
 #[tokio::test]
 #[ignore]
-async fn test_composite_request() -> Result<()> {
+async fn test_composite_request_create_with_reference() -> Result<()> {
     let conn = get_test_connection()?;
     let mut request = CompositeRequest::new(conn.get_base_url_path(), Some(true), Some(false));
     let account_type = &conn.get_type("Account").await?;
@@ -21,8 +21,8 @@ async fn test_composite_request() -> Result<()> {
     let mut account_request = SObjectCreateRequest::new(&mut account)?;
     let mut contact_request = SObjectCreateRequest::new(&mut contact)?;
 
-    request.add("acct", &mut account_request);
-    request.add("ct", &mut contact_request);
+    request.add("acct", &mut account_request)?;
+    request.add("ct", &mut contact_request)?;
 
     let result = conn.execute(&request).await?;
 
@@ -32,8 +32,10 @@ async fn test_composite_request() -> Result<()> {
     assert!(account_result.success);
     assert!(contact_result.success);
 
-    let account = SObject::retrieve(&conn, &account_type, account_result.id.unwrap(), None).await?;
-    let contact = SObject::retrieve(&conn, &contact_type, contact_result.id.unwrap(), None).await?;
+    let mut account =
+        SObject::retrieve(&conn, &account_type, account_result.id.unwrap(), None).await?;
+    let mut contact =
+        SObject::retrieve(&conn, &contact_type, contact_result.id.unwrap(), None).await?;
 
     assert_eq!(
         contact.get("AccountId").unwrap(),
@@ -42,6 +44,34 @@ async fn test_composite_request() -> Result<()> {
 
     contact.delete(&conn).await?;
     account.delete(&conn).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_composite_request_create_update_delete() -> Result<()> {
+    let conn = get_test_connection()?;
+    let mut request = CompositeRequest::new(conn.get_base_url_path(), Some(true), Some(false));
+    let account_type = &conn.get_type("Account").await?;
+    let mut account = SObject::new(&account_type).with_str("Name", "Test");
+    let mut account_request = SObjectCreateRequest::new(&mut account)?;
+    let mut updated_account = SObject::new(&account_type)
+        .with_composite_reference("Id", "@{create.id}")
+        .with_str("Name", "Foo");
+    let mut delete_account =
+        SObject::new(&account_type).with_composite_reference("Id", "@{create.id}");
+    let mut update_account_request = SObjectUpdateRequest::new(&mut updated_account);
+    let mut delete_account_request = SObjectDeleteRequest::new(&mut delete_account);
+
+    request.add("create", &mut account_request)?;
+    request.add("update", &mut update_account_request)?;
+    request.add("delete", &mut delete_account_request)?;
+
+    let result = conn.execute(&request).await?;
+    let account_result = result.get_result(&conn, "delete", &account_request)?;
+
+    assert!(account_result.success);
 
     Ok(())
 }

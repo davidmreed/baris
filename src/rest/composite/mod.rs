@@ -16,7 +16,6 @@ use super::ApiError;
 mod test;
 
 pub struct CompositeRequest {
-    // TODO: use builder pattern.
     keys: Vec<String>,
     requests: HashMap<String, CompositeSubrequest>,
     all_or_none: Option<bool>, // TODO: Option<Option<bool>>, to allow them to be unspecified?
@@ -39,19 +38,31 @@ impl CompositeRequest {
         }
     }
 
-    pub fn add(&mut self, key: &str, req: &(impl SalesforceRequest + CompositeFriendlyRequest)) {
-        // TODO: support query parameters
+    pub fn add(
+        &mut self,
+        key: &str,
+        req: &(impl SalesforceRequest + CompositeFriendlyRequest),
+    ) -> Result<()> {
         self.keys.push(key.to_string());
+
+        let query_string = if let Some(params) = req.get_query_parameters() {
+            format!("?{}", serde_urlencoded::to_string(&params)?)
+        } else {
+            "".to_owned()
+        };
+
         self.requests.insert(
             key.to_string(),
             CompositeSubrequest {
-                url: format!("{}{}", self.base_url, req.get_url()),
+                url: format!("{}{}{}", self.base_url, req.get_url(), query_string),
                 body: req.get_body(),
                 method: req.get_method().to_string(),
                 reference_id: Some(key.to_string()),
                 http_headers: None,
             },
         );
+
+        Ok(())
     }
 }
 

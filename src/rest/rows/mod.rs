@@ -88,12 +88,8 @@ impl<'a, T> SObjectUpdateRequest<'a, T>
 where
     T: SObjectRepresentation,
 {
-    pub fn new(sobject: &'a mut T) -> Result<SObjectUpdateRequest<T>> {
-        if sobject.get_id().is_none() {
-            Err(SalesforceError::RecordDoesNotExistError.into())
-        } else {
-            Ok(SObjectUpdateRequest { sobject })
-        }
+    pub fn new(sobject: &'a mut T) -> SObjectUpdateRequest<T> {
+        SObjectUpdateRequest { sobject }
     }
 }
 
@@ -214,12 +210,8 @@ impl<'a, T> SObjectDeleteRequest<'a, T>
 where
     T: SObjectRepresentation,
 {
-    pub fn new(sobject: &'a mut T) -> Result<SObjectDeleteRequest<T>> {
-        if let Some(_) = sobject.get_id() {
-            Ok(SObjectDeleteRequest { sobject })
-        } else {
-            Err(SalesforceError::RecordDoesNotExistError.into())
-        }
+    pub fn new(sobject: &'a mut T) -> SObjectDeleteRequest<T> {
+        SObjectDeleteRequest { sobject }
     }
 }
 
@@ -233,7 +225,7 @@ where
         format!(
             "sobjects/{}/{}",
             self.sobject.get_api_name(),
-            self.sobject.get_id().unwrap()
+            self.sobject.get_id().unwrap() // TODO: this can panic because we cannot enforce Id presence at create time (reference params)
         )
     }
 

@@ -51,7 +51,7 @@ where
     }
 
     async fn update(&mut self, conn: &Connection) -> Result<()> {
-        conn.execute(&SObjectUpdateRequest::new(self)?).await
+        conn.execute(&SObjectUpdateRequest::new(self)).await
     }
 
     async fn upsert(&mut self, conn: &Connection, external_id: &str) -> Result<()> {
@@ -71,7 +71,7 @@ where
     }
 
     async fn delete(&mut self, conn: &Connection) -> Result<()> {
-        let result = conn.execute(&SObjectDeleteRequest::new(self)?).await;
+        let result = conn.execute(&SObjectDeleteRequest::new(self)).await;
 
         if let Ok(_) = &result {
             self.set_id(None);
