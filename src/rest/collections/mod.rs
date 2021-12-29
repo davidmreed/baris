@@ -2,14 +2,14 @@ use std::marker::PhantomData;
 
 use crate::{
     api::{CompositeFriendlyRequest, SalesforceRequest},
-    data::SObjectRepresentation,
+    data::{SObjectDeserialization, SObjectSerialization, SObjectWithId},
     Connection, SObjectType, SalesforceError, SalesforceId,
 };
 
 use anyhow::Result;
 use itertools::Itertools;
 use reqwest::Method;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
 use super::DmlResult;
 
@@ -18,19 +18,22 @@ pub mod traits;
 #[cfg(test)]
 mod test;
 
-pub struct SObjectCollectionCreateRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
-    objects: &'a mut Vec<T>,
+pub struct SObjectCollectionCreateRequest {
+    records: Vec<Value>,
     all_or_none: bool,
 }
 
-impl<'a, T> SObjectCollectionCreateRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
-    pub fn new(objects: &'a mut Vec<T>, all_or_none: bool) -> Result<Self> {
+impl SObjectCollectionCreateRequest {
+    pub fn new_raw(records: Vec<Value>, all_or_none: bool) -> Self {
+        Self {
+            records,
+            all_or_none,
+        }
+    }
+    pub fn new<T>(objects: &Vec<T>, all_or_none: bool) -> Result<Self>
+    where
+        T: SObjectSerialization + SObjectWithId,
+    {
         if !objects.iter().all(|s| s.get_id().is_null()) {
             return Err(SalesforceError::RecordExistsError.into());
         }
@@ -39,24 +42,23 @@ where
         }
         // NTH: validate that there are up to 10 chunks.
 
-        Ok(SObjectCollectionCreateRequest {
-            objects,
+        Ok(Self::new_raw(
+            objects
+                .iter()
+                .map(|s| s.to_value_with_options(true, false))
+                .collect::<Result<Vec<Value>>>()?,
             all_or_none,
-        })
+        ))
     }
 }
 
-impl<'a, T> SalesforceRequest for SObjectCollectionCreateRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
+impl SalesforceRequest for SObjectCollectionCreateRequest {
     type ReturnValue = Vec<DmlResult>;
 
-    // TODO: this should return a Result<Option<Value>>
     fn get_body(&self) -> Option<Value> {
         Some(json! ({
             "allOrNone": self.all_or_none,
-            "records": self.objects.iter().map(|s| s.to_value_with_options(true, false)).collect::<Result<Vec<Value>>>().ok()
+            "records": self.records
         }))
     }
 
@@ -81,14 +83,11 @@ where
     }
 }
 
-impl<'a, T> CompositeFriendlyRequest for SObjectCollectionCreateRequest<'a, T> where
-    T: SObjectRepresentation
-{
-}
+impl CompositeFriendlyRequest for SObjectCollectionCreateRequest {}
 
 pub struct SObjectCollectionRetrieveRequest<T>
 where
-    T: SObjectRepresentation,
+    T: SObjectDeserialization,
 {
     sobject_type: SObjectType,
     ids: Vec<SalesforceId>,
@@ -98,7 +97,7 @@ where
 
 impl<T> SObjectCollectionRetrieveRequest<T>
 where
-    T: SObjectRepresentation,
+    T: SObjectDeserialization,
 {
     pub fn new(sobject_type: &SObjectType, ids: Vec<SalesforceId>, fields: Vec<String>) -> Self {
         SObjectCollectionRetrieveRequest {
@@ -112,7 +111,7 @@ where
 
 impl<T> SalesforceRequest for SObjectCollectionRetrieveRequest<T>
 where
-    T: SObjectRepresentation,
+    T: SObjectDeserialization,
 {
     type ReturnValue = Vec<Option<T>>;
 
@@ -156,23 +155,26 @@ where
 }
 
 impl<T> CompositeFriendlyRequest for SObjectCollectionRetrieveRequest<T> where
-    T: SObjectRepresentation
+    T: SObjectDeserialization
 {
 }
 
-pub struct SObjectCollectionUpdateRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
-    objects: &'a mut Vec<T>,
+pub struct SObjectCollectionUpdateRequest {
+    records: Vec<Value>,
     all_or_none: bool,
 }
 
-impl<'a, T> SObjectCollectionUpdateRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
-    pub fn new(objects: &'a mut Vec<T>, all_or_none: bool) -> Result<Self> {
+impl SObjectCollectionUpdateRequest {
+    pub fn new_raw(records: Vec<Value>, all_or_none: bool) -> Self {
+        Self {
+            records,
+            all_or_none,
+        }
+    }
+    pub fn new<T>(objects: &Vec<T>, all_or_none: bool) -> Result<Self>
+    where
+        T: SObjectSerialization + SObjectWithId,
+    {
         if !objects.iter().all(|s| s.get_id().is_null()) {
             return Err(SalesforceError::RecordDoesNotExistError.into());
         }
@@ -181,23 +183,23 @@ where
         }
         // NTH: validate that there are up to 10 chunks.
 
-        Ok(SObjectCollectionUpdateRequest {
-            objects,
+        Ok(Self::new_raw(
+            objects
+                .iter()
+                .map(|s| s.to_value_with_options(true, false))
+                .collect::<Result<Vec<Value>>>()?,
             all_or_none,
-        })
+        ))
     }
 }
 
-impl<'a, T> SalesforceRequest for SObjectCollectionUpdateRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
+impl SalesforceRequest for SObjectCollectionUpdateRequest {
     type ReturnValue = Vec<DmlResult>;
 
     fn get_body(&self) -> Option<Value> {
         Some(json! ({
             "allOrNone": self.all_or_none,
-            "records": self.objects.iter().map(|s| s.to_value_with_options(true, false)).collect::<Result<Vec<Value>>>().ok()
+            "records": self.records
         }))
     }
 
@@ -222,55 +224,62 @@ where
     }
 }
 
-impl<'a, T> CompositeFriendlyRequest for SObjectCollectionUpdateRequest<'a, T> where
-    T: SObjectRepresentation
-{
-}
+impl CompositeFriendlyRequest for SObjectCollectionUpdateRequest {}
 
-pub struct SObjectCollectionUpsertRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
-    objects: &'a mut Vec<T>,
+pub struct SObjectCollectionUpsertRequest {
+    objects: Vec<Value>,
     external_id: String,
     sobject_type: SObjectType,
     all_or_none: bool,
 }
 
-impl<'a, T> SObjectCollectionUpsertRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
-    pub fn new(
-        objects: &'a mut Vec<T>,
+impl SObjectCollectionUpsertRequest {
+    pub fn new_raw(
+        objects: Vec<Value>,
+        external_id: String,
+        sobject_type: SObjectType,
+        all_or_none: bool,
+    ) -> Self {
+        Self {
+            objects,
+            external_id,
+            sobject_type,
+            all_or_none,
+        }
+    }
+    pub fn new<T>(
+        objects: &Vec<T>,
         sobject_type: &SObjectType,
         external_id: &str,
         all_or_none: bool,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        T: SObjectSerialization,
+    {
         if objects.len() > 200 {
             return Err(SalesforceError::SObjectCollectionError.into());
         }
         // TODO: validate that all provided objects are of type sobject_type
 
-        Ok(SObjectCollectionUpsertRequest {
-            objects,
-            external_id: external_id.to_owned(),
-            sobject_type: sobject_type.clone(),
+        Ok(Self::new_raw(
+            objects
+                .iter()
+                .map(|s| s.to_value_with_options(true, false))
+                .collect::<Result<Vec<Value>>>()?,
+            external_id.to_owned(),
+            sobject_type.clone(),
             all_or_none,
-        })
+        ))
     }
 }
 
-impl<'a, T> SalesforceRequest for SObjectCollectionUpsertRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
+impl SalesforceRequest for SObjectCollectionUpsertRequest {
     type ReturnValue = Vec<DmlResult>;
 
     fn get_body(&self) -> Option<Value> {
         Some(json! ({
             "allOrNone": self.all_or_none,
-            "records": self.objects.iter().map(|s| s.to_value_with_options(true, false)).collect::<Result<Vec<Value>>>().ok()
+            "records": self.objects
         }))
     }
 
@@ -295,24 +304,21 @@ where
     }
 }
 
-impl<'a, T> CompositeFriendlyRequest for SObjectCollectionUpsertRequest<'a, T> where
-    T: SObjectRepresentation
-{
-}
+impl CompositeFriendlyRequest for SObjectCollectionUpsertRequest {}
 
-pub struct SObjectCollectionDeleteRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
-    objects: &'a mut Vec<T>,
+pub struct SObjectCollectionDeleteRequest {
+    ids: Vec<String>,
     all_or_none: bool,
 }
 
-impl<'a, T> SObjectCollectionDeleteRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
-    pub fn new(objects: &'a mut Vec<T>, all_or_none: bool) -> Result<Self> {
+impl SObjectCollectionDeleteRequest {
+    pub fn new_raw(ids: Vec<String>, all_or_none: bool) -> Self {
+        Self { ids, all_or_none }
+    }
+    pub fn new<T>(objects: &Vec<T>, all_or_none: bool) -> Result<Self>
+    where
+        T: SObjectWithId,
+    {
         if !objects.iter().all(|s| !s.get_id().is_null()) {
             return Err(SalesforceError::RecordDoesNotExistError.into());
         }
@@ -321,17 +327,14 @@ where
             return Err(SalesforceError::SObjectCollectionError.into());
         }
 
-        Ok(SObjectCollectionDeleteRequest {
-            objects,
+        Ok(Self::new_raw(
+            objects.iter().map(|o| o.get_id().as_string()).collect(),
             all_or_none,
-        })
+        ))
     }
 }
 
-impl<'a, T> SalesforceRequest for SObjectCollectionDeleteRequest<'a, T>
-where
-    T: SObjectRepresentation,
-{
+impl SalesforceRequest for SObjectCollectionDeleteRequest {
     type ReturnValue = Vec<DmlResult>;
 
     fn get_url(&self) -> String {
@@ -339,21 +342,10 @@ where
     }
 
     fn get_query_parameters(&self) -> Option<Value> {
-        let mut hm = Map::new();
-
-        // Will not panic by implementation of new().
-        hm.insert(
-            "ids".to_string(),
-            Value::String(
-                self.objects
-                    .iter()
-                    .map(|o| o.get_id().as_string())
-                    .join(","),
-            ),
-        );
-        hm.insert("allOrNone".to_string(), Value::Bool(self.all_or_none));
-
-        Some(Value::Object(hm))
+        Some(json!({
+            "ids": self.ids.iter().join(","),
+            "allOrNone": self.all_or_none
+        }))
     }
 
     fn get_method(&self) -> Method {
@@ -369,7 +361,4 @@ where
     }
 }
 
-impl<'a, T> CompositeFriendlyRequest for SObjectCollectionDeleteRequest<'a, T> where
-    T: SObjectRepresentation
-{
-}
+impl CompositeFriendlyRequest for SObjectCollectionDeleteRequest {}

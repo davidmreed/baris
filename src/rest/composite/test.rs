@@ -56,13 +56,12 @@ async fn test_composite_request_create_update_delete() -> Result<()> {
     let account_type = &conn.get_type("Account").await?;
     let mut account = SObject::new(&account_type).with_str("Name", "Test");
     let mut account_request = SObjectCreateRequest::new(&mut account)?;
-    let mut updated_account = SObject::new(&account_type)
+    let updated_account = SObject::new(&account_type)
         .with_composite_reference("Id", "@{create.id}")
         .with_str("Name", "Foo");
-    let mut delete_account =
-        SObject::new(&account_type).with_composite_reference("Id", "@{create.id}");
-    let mut update_account_request = SObjectUpdateRequest::new(&mut updated_account)?;
-    let mut delete_account_request = SObjectDeleteRequest::new(&mut delete_account)?;
+    let delete_account = SObject::new(&account_type).with_composite_reference("Id", "@{create.id}");
+    let mut update_account_request = SObjectUpdateRequest::new(&updated_account)?;
+    let mut delete_account_request = SObjectDeleteRequest::new(&delete_account)?;
 
     request.add("create", &mut account_request)?;
     request.add("update", &mut update_account_request)?;
@@ -71,7 +70,19 @@ async fn test_composite_request_create_update_delete() -> Result<()> {
     let result = conn.execute(&request).await?;
     let account_result = result.get_result(&conn, "delete", &delete_account_request)?;
 
-    //assert!(account_result.success);
+    //assert!(account_result.success); TODO
+
+    /* Future state:
+        let result = composite!({
+            "create" => account.create_request(),
+            "update" => account.with_str("Name", "foo").update_request(),
+            "delete" => account.delete_request()
+        }).execute(&conn).await?;
+
+        assert_eq!(result.http_status, 200);
+        assert_eq!(result.create.http_status, 200);
+        assert!(result.create.body.id != null);
+    */
 
     Ok(())
 }

@@ -7,41 +7,8 @@ Cactusforce
 - [Ideal] We should implement sObject Collections DML on collections other than Vecs, as well as iterators and streams.
 - [Ideal] Build prelude
 
-POSSIBLE APPROACHES TO REFERENCE HANDLING FOR IDS
-
-Reference Ids are _only_ relevant when using Composite requests. We do not want to make
-other operations less ergonomic.
-
-I think we want to do _both_ Request early serialization _and_ changes to the SObjectWithId trait
-
-# Handle at the Request level by providing overrides
-
-The Request would then have to handle injecting these overrides into the serialized representation of
-the SObject. We would have to use a builder pattern to be able to add back our validation for Ids.
-
-# Handle at the Request level with early serialization
-
-Rather than hold a mutable reference to the SObject, each Request would serialize the SObject
-at creation time, and can then access whatever value is in the Id field via the Value enum
-rather than our trait.
-
-This doesn't solve the impedance mismatch with the SObjectWithId trait, and loses the property
-that objects cannot be mutated while requests are in flight, but would make it more ergonomic
-to compose multiple mutating requests in Composite against the same SObject.
-
-# Handle at the SalesforceId level by making the type algebraic
-
-Confusing because FieldValue already handles both Ids and References
-
-# Handle at the trait level by changing the interface for SObjectWithId
-
-Unclear what this would need to look like. Have `get_id()` return an enumerated type _above_
-the level of SalesforceId? Perhaps a FieldValue? That might actually work.
-
-How would this impact our derives? We might need a more sophisticated derive method that
-can handle Id elements of different types.
-
-Our Request trait will probably need to have more Result outputs, or a `validate()` method, or both.
+- Can we remove the SObjectWithId trait entirely, since we're now using early serialization?
+- Error handling for requests that do not return a DmlResult is currently not great.
 
 MVP
 
