@@ -54,7 +54,7 @@ async fn test_bulk_query_dynamic_type() -> Result<()> {
         let act = act?;
         println!(
             "I found an Account with Id {} and Name {}",
-            act.get_id().unwrap(),
+            act.get_opt_id().unwrap(),
             act.get("Name").unwrap().as_string()
         );
         // TODO: add assertions.

@@ -1,6 +1,6 @@
 use crate::{
     data::{DynamicallyTypedSObject, SObjectRepresentation, SingleTypedSObject},
-    Connection, SObjectType,
+    Connection, FieldValue, SObjectType,
 };
 
 use anyhow::Result;
@@ -54,7 +54,9 @@ where
             .enumerate()
             .map(|(i, r)| {
                 if r.success {
-                    self.get_mut(i).unwrap().set_id(r.id);
+                    self.get_mut(i)
+                        .unwrap()
+                        .set_id(FieldValue::Id(r.id.unwrap()));
                 }
 
                 r.into()
@@ -90,7 +92,9 @@ where
             .map(|(i, r)| {
                 if r.success {
                     if let Some(true) = r.created {
-                        self.get_mut(i).unwrap().set_id(r.id);
+                        self.get_mut(i)
+                            .unwrap()
+                            .set_id(FieldValue::Id(r.id.unwrap()));
                     }
                 }
 
@@ -108,7 +112,7 @@ where
             .enumerate()
             .map(|(i, r)| {
                 if r.success {
-                    self.get_mut(i).unwrap().set_id(None);
+                    self.get_mut(i).unwrap().set_id(FieldValue::Null);
                 }
 
                 r.into()
@@ -132,7 +136,9 @@ where
             .enumerate()
             .map(|(i, r)| {
                 if r.success {
-                    self.get_mut(i).unwrap().set_id(r.id);
+                    self.get_mut(i)
+                        .unwrap()
+                        .set_id(FieldValue::Id(r.id.unwrap()));
                 }
 
                 r.into()
@@ -171,7 +177,9 @@ where
             .map(|(i, r)| {
                 if r.success {
                     if let Some(true) = r.created {
-                        self.get_mut(i).unwrap().set_id(r.id);
+                        self.get_mut(i)
+                            .unwrap()
+                            .set_id(FieldValue::Id(r.id.unwrap()));
                     }
                 }
 
@@ -189,7 +197,7 @@ where
             .enumerate()
             .map(|(i, r)| {
                 if r.success {
-                    self.get_mut(i).unwrap().set_id(None);
+                    self.get_mut(i).unwrap().set_id(FieldValue::Null);
                 }
 
                 r.into()

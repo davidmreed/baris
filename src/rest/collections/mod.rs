@@ -31,7 +31,7 @@ where
     T: SObjectRepresentation,
 {
     pub fn new(objects: &'a mut Vec<T>, all_or_none: bool) -> Result<Self> {
-        if !objects.iter().all(|s| s.get_id().is_none()) {
+        if !objects.iter().all(|s| s.get_id().is_null()) {
             return Err(SalesforceError::RecordExistsError.into());
         }
         if objects.len() > 200 {
@@ -173,7 +173,7 @@ where
     T: SObjectRepresentation,
 {
     pub fn new(objects: &'a mut Vec<T>, all_or_none: bool) -> Result<Self> {
-        if !objects.iter().all(|s| s.get_id().is_some()) {
+        if !objects.iter().all(|s| s.get_id().is_null()) {
             return Err(SalesforceError::RecordDoesNotExistError.into());
         }
         if objects.len() > 200 {
@@ -313,7 +313,7 @@ where
     T: SObjectRepresentation,
 {
     pub fn new(objects: &'a mut Vec<T>, all_or_none: bool) -> Result<Self> {
-        if !objects.iter().all(|s| s.get_id().is_some()) {
+        if !objects.iter().all(|s| !s.get_id().is_null()) {
             return Err(SalesforceError::RecordDoesNotExistError.into());
         }
 
@@ -347,7 +347,7 @@ where
             Value::String(
                 self.objects
                     .iter()
-                    .map(|o| o.get_id().unwrap().to_string())
+                    .map(|o| o.get_id().as_string())
                     .join(","),
             ),
         );

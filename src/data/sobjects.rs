@@ -289,20 +289,12 @@ pub struct SObject {
 }
 
 impl SObjectWithId for SObject {
-    fn get_id(&self) -> Option<SalesforceId> {
-        if let Some(FieldValue::Id(id)) = self.get("id") {
-            Some(id.clone())
-        } else {
-            None
-        }
+    fn get_id(&self) -> FieldValue {
+        self.get("id").unwrap_or(&FieldValue::Null).clone()
     }
 
-    fn set_id(&mut self, id: Option<SalesforceId>) {
-        if let Some(id) = id {
-            self.put("id", FieldValue::Id(id));
-        } else {
-            self.put("id", FieldValue::Null);
-        }
+    fn set_id(&mut self, id: FieldValue) {
+        self.put("id", id); // TODO: validate + panic?
     }
 }
 
@@ -335,11 +327,19 @@ impl SObjectSerialization for SObject {
                     json!({"type": self.get_api_name() }),
                 );
             }
-            if include_id && self.get_id().is_some() {
-                map.insert(
-                    "id".to_string(),
-                    Value::String(self.get_id().unwrap().to_string()),
-                );
+            if include_id {
+                match self.get_id() {
+                    FieldValue::Id(_) | FieldValue::CompositeReference(_) => {
+                        map.insert("id".to_string(), Value::String(self.get_id().as_string()));
+                    }
+                    _ => {
+                        return Err(SalesforceError::InvalidIdError(format!(
+                            "{:?} is not a valid Salesforce Id",
+                            self.get_id()
+                        ))
+                        .into());
+                    }
+                }
             } else {
                 // TODO: handle case-insensitivity
                 if map.contains_key("id") {

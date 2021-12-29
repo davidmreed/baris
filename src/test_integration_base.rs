@@ -4,8 +4,8 @@ use serde_derive::{Deserialize, Serialize};
 use std::env;
 
 use crate::data::{SObjectWithId, SingleTypedSObject};
-use crate::SalesforceId;
 use crate::{auth::AccessTokenAuth, Connection};
+use crate::{FieldValue, SalesforceId};
 
 pub fn get_test_connection() -> Result<Connection> {
     let access_token = env::var("SESSION_ID")?;
@@ -28,12 +28,24 @@ pub struct Account {
 }
 
 impl SObjectWithId for Account {
-    fn get_id(&self) -> Option<SalesforceId> {
-        self.id
+    fn get_id(&self) -> FieldValue {
+        if let Some(id) = self.id {
+            FieldValue::Id(id)
+        } else {
+            FieldValue::Null
+        }
     }
 
-    fn set_id(&mut self, id: Option<SalesforceId>) {
-        self.id = id;
+    fn set_id(&mut self, id: FieldValue) {
+        match id {
+            FieldValue::Id(id) => {
+                self.id = Some(id);
+            }
+            FieldValue::Null => self.id = None,
+            _ => {
+                panic!("Invalid id: {:?}", id);
+            }
+        }
     }
 }
 
