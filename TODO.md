@@ -1,14 +1,11 @@
 Cactusforce
 
-- Add support for Bulk DML
 - Open source
+- Add support for Bulk DML or Parallel Streams or both
 - [Ideal] We should implement sObject Collections DML on collections other than Vecs, as well as iterators and streams.
-- [Ideal] Build prelude
 
-- Can we remove the SObjectWithId trait entirely, since we're now using early serialization?
-- Error handling for requests that do not return a DmlResult is currently not great.
-  - Queries with bad fields are not currently having errors handled other than via `error_for_status()`
-- Fix the Bulk API tests
+- [Ideal] Build prelude
+- Fix the Bulk API tests (?)
 
 MVP
 
@@ -17,6 +14,11 @@ MVP
 
   - Parallelization militates for using clone() explicitly in the parameters.
   - Should we have a separate set of \_parallel() DML methods that take `conn` without a ref?
+
+- Can we remove the SObjectWithId trait entirely, since we're now using early serialization?
+- Error handling for requests that do not return a DmlResult is currently not great.
+
+  - Queries with bad fields are not currently having errors handled other than via `error_for_status()`
 
 - Add support for nested sObjects
 - Add support for Blob DML
