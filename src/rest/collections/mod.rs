@@ -315,6 +315,7 @@ impl SObjectCollectionDeleteRequest {
     pub fn new_raw(ids: Vec<String>, all_or_none: bool) -> Self {
         Self { ids, all_or_none }
     }
+
     pub fn new<T>(objects: &Vec<T>, all_or_none: bool) -> Result<Self>
     where
         T: SObjectWithId,
@@ -338,7 +339,7 @@ impl SalesforceRequest for SObjectCollectionDeleteRequest {
     type ReturnValue = Vec<DmlResult>;
 
     fn get_url(&self) -> String {
-        format!("composite/sobjects",)
+        "composite/sobjects".to_owned()
     }
 
     fn get_query_parameters(&self) -> Option<Value> {

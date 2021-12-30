@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::rest::collections::{SObjectCollectionCreateRequest, SObjectCollectionDeleteRequest};
 use crate::rest::rows::traits::{SObjectDML, SObjectDynamicallyTypedRetrieval};
 use crate::rest::rows::{SObjectCreateRequest, SObjectDeleteRequest, SObjectUpdateRequest};
 use crate::test_integration_base::get_test_connection;
@@ -14,12 +15,12 @@ async fn test_composite_request_create_with_reference() -> Result<()> {
     let mut request = CompositeRequest::new(conn.get_base_url_path(), Some(true), Some(false));
     let account_type = &conn.get_type("Account").await?;
     let contact_type = &conn.get_type("Contact").await?;
-    let mut account = SObject::new(&account_type).with_str("Name", "Test");
-    let mut contact = SObject::new(&contact_type)
+    let account = SObject::new(&account_type).with_str("Name", "Test");
+    let contact = SObject::new(&contact_type)
         .with_str("LastName", "Foo")
         .with_composite_reference("AccountId", "@{acct.id}");
-    let mut account_request = SObjectCreateRequest::new(&mut account)?;
-    let mut contact_request = SObjectCreateRequest::new(&mut contact)?;
+    let mut account_request = SObjectCreateRequest::new(&account)?;
+    let mut contact_request = SObjectCreateRequest::new(&contact)?;
 
     request.add("acct", &mut account_request)?;
     request.add("ct", &mut contact_request)?;
@@ -54,8 +55,8 @@ async fn test_composite_request_create_update_delete() -> Result<()> {
     let conn = get_test_connection()?;
     let mut request = CompositeRequest::new(conn.get_base_url_path(), Some(true), Some(false));
     let account_type = &conn.get_type("Account").await?;
-    let mut account = SObject::new(&account_type).with_str("Name", "Test");
-    let mut account_request = SObjectCreateRequest::new(&mut account)?;
+    let account = SObject::new(&account_type).with_str("Name", "Test");
+    let mut account_request = SObjectCreateRequest::new(&account)?;
     let updated_account = SObject::new(&account_type)
         .with_composite_reference("Id", "@{create.id}")
         .with_str("Name", "Foo");
@@ -83,6 +84,27 @@ async fn test_composite_request_create_update_delete() -> Result<()> {
         assert_eq!(result.create.http_status, 200);
         assert!(result.create.body.id != null);
     */
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_composite_request_collections() -> Result<()> {
+    let conn = get_test_connection()?;
+    let mut request = CompositeRequest::new(conn.get_base_url_path(), Some(true), Some(false));
+    let account_type = &conn.get_type("Account").await?;
+    let account = SObject::new(&account_type).with_str("Name", "Test");
+    let mut account_request = SObjectCollectionCreateRequest::new(&vec![account], true)?;
+    let delete_account =
+        SObject::new(&account_type).with_composite_reference("Id", "@{create[0].id}");
+    let mut delete_account_request = SObjectDeleteRequest::new(&delete_account)?;
+
+    request.add("create", &mut account_request)?;
+    request.add("delete", &mut delete_account_request)?;
+
+    let result = conn.execute(&request).await?;
+    let account_result = result.get_result(&conn, "delete", &delete_account_request)?;
 
     Ok(())
 }
