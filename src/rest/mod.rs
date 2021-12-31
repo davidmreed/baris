@@ -71,6 +71,26 @@ pub struct DmlResult {
     pub errors: Vec<DmlError>,
 }
 
+impl Into<Result<SalesforceId>> for DmlResult {
+    fn into(self) -> Result<SalesforceId> {
+        if !self.success {
+            if self.errors.len() > 0 {
+                // TODO: handle multiple errors, if this ever happens.
+                let err = self.errors[0].clone();
+                Err(err.into())
+            } else {
+                Err(SalesforceError::UnknownError.into())
+            }
+        } else {
+            if let Some(id) = self.id {
+                Ok(id)
+            } else {
+                Err(SalesforceError::UnknownError.into()) // TODO: specificity
+            }
+        }
+    }
+}
+
 impl Into<Result<Option<SalesforceId>>> for DmlResult {
     fn into(self) -> Result<Option<SalesforceId>> {
         if !self.success {

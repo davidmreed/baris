@@ -19,8 +19,6 @@ use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use tokio::{spawn, sync::mpsc, task::JoinHandle};
 
-use self::traits::SObjectCollection;
-
 use super::DmlResult;
 
 pub mod traits;
@@ -36,44 +34,171 @@ pub trait SObjectStream<T> {
         all_or_none: bool,
         parallel: Option<usize>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>>>>>;
+
+    fn update_all(
+        self,
+        conn: &Connection,
+        batch_size: usize,
+        all_or_none: bool,
+        parallel: Option<usize>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>>>>>;
+
+    fn upsert_all(
+        self,
+        conn: &Connection,
+        external_id: String,
+        batch_size: usize,
+        all_or_none: bool,
+        parallel: Option<usize>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>>>>>;
+
+    fn delete_all(
+        self,
+        conn: &Connection,
+        batch_size: usize,
+        all_or_none: bool,
+        parallel: Option<usize>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>>>>>;
 }
 
-async fn run_create<T>(
-    mut sobjects: Vec<T>,
-    conn: Connection,
-    all_or_none: bool,
-) -> Result<Vec<Result<SalesforceId>>>
+#[async_trait]
+trait BulkDmlOperation<T>: Clone
 where
     T: SObjectRepresentation,
 {
-    // TODO: Using the SObjectCollections trait isn't maximally efficient -
-    // it mutates the receiver, but we don't need it to in this context.
-    let result = sobjects.create(conn, all_or_none).await;
+    type ResultType;
+    async fn perform_dml(
+        &self,
+        sobjects: Vec<T>,
+        conn: Connection,
+        all_or_none: bool,
+    ) -> Result<Vec<Result<Self::ResultType>>>;
+}
 
-    match result {
-        Ok(results) => {
-            // The overall API call succeeded.
-            // Generate a result vector
-            Ok(results
-                .into_iter()
-                .enumerate()
-                .map(|(i, r)| r.map(|_| sobjects[i].get_opt_id().unwrap()))
-                .collect())
-        }
-        Err(e) => Err(e),
+#[derive(Clone)]
+struct CreateOperation {}
+
+#[async_trait]
+impl<T> BulkDmlOperation<T> for CreateOperation
+where
+    T: SObjectRepresentation,
+{
+    type ResultType = SalesforceId;
+    async fn perform_dml(
+        &self,
+        sobjects: Vec<T>,
+        conn: Connection,
+        all_or_none: bool,
+    ) -> Result<Vec<Result<Self::ResultType>>> {
+        Ok(conn
+            .execute(&SObjectCollectionCreateRequest::new(
+                &sobjects,
+                all_or_none,
+            )?)
+            .await?
+            .into_iter()
+            .map(|r| r.into())
+            .collect())
     }
 }
 
-fn parallelize_creates<T, K>(
+#[derive(Clone)]
+struct UpdateOperation {}
+
+#[async_trait]
+impl<T> BulkDmlOperation<T> for UpdateOperation
+where
+    T: SObjectRepresentation,
+{
+    type ResultType = ();
+    async fn perform_dml(
+        &self,
+        sobjects: Vec<T>,
+        conn: Connection,
+        all_or_none: bool,
+    ) -> Result<Vec<Result<Self::ResultType>>> {
+        Ok(conn
+            .execute(&SObjectCollectionUpdateRequest::new(
+                &sobjects,
+                all_or_none,
+            )?)
+            .await?
+            .into_iter()
+            .map(|r| r.into())
+            .collect())
+    }
+}
+
+#[derive(Clone)]
+struct UpsertOperation {
+    pub external_id: String,
+}
+
+#[async_trait]
+impl<T> BulkDmlOperation<T> for UpsertOperation
+where
+    T: SObjectRepresentation,
+{
+    type ResultType = SalesforceId;
+    async fn perform_dml(
+        &self,
+        sobjects: Vec<T>,
+        conn: Connection,
+        all_or_none: bool,
+    ) -> Result<Vec<Result<Self::ResultType>>> {
+        Ok(conn
+            .execute(&SObjectCollectionUpsertRequest::new(
+                &sobjects,
+                &self.external_id,
+                all_or_none,
+            )?)
+            .await?
+            .into_iter()
+            .map(|r| r.into())
+            .collect())
+    }
+}
+
+#[derive(Clone)]
+struct DeleteOperation {}
+
+#[async_trait]
+impl<T> BulkDmlOperation<T> for DeleteOperation
+where
+    T: SObjectRepresentation,
+{
+    type ResultType = ();
+    async fn perform_dml(
+        &self,
+        sobjects: Vec<T>,
+        conn: Connection,
+        all_or_none: bool,
+    ) -> Result<Vec<Result<Self::ResultType>>> {
+        Ok(conn
+            .execute(&SObjectCollectionDeleteRequest::new(
+                &sobjects,
+                all_or_none,
+            )?)
+            .await?
+            .into_iter()
+            .map(|r| r.into())
+            .collect())
+    }
+}
+
+fn parallelize_dml<T, K, O: BulkDmlOperation<K>, R>(
     sobjects: T,
     connection: Connection,
     batch_size: usize,
     all_or_none: bool,
     parallel: usize,
-) -> mpsc::Receiver<JoinHandle<Result<Vec<Result<SalesforceId>>>>>
+    operation: O,
+) -> mpsc::Receiver<JoinHandle<Result<Vec<Result<R>>>>>
 where
     T: Stream<Item = K> + Send + 'static,
     K: SObjectRepresentation + 'static,
+    O: BulkDmlOperation<K, ResultType = R> + Send + Sync + 'static,
+    R: Send + 'static,
 {
     let (tx, rx) = mpsc::channel(parallel);
     let conn = connection.clone();
@@ -82,12 +207,53 @@ where
 
     spawn(async move {
         while let Some(chunk) = chunks.next().await {
-            tx.send(spawn(run_create(chunk, conn.clone(), all_or_none)))
-                .await;
+            let c = conn.clone();
+            let o = operation.clone();
+            tx.send(spawn(async move {
+                return o.perform_dml(chunk, c, all_or_none).await;
+            }))
+            .await;
         }
     });
 
     rx
+}
+
+fn run_dml<S, O, R, T>(
+    stream: S,
+    conn: &Connection,
+    batch_size: usize,
+    all_or_none: bool,
+    parallel: Option<usize>,
+    operation: O,
+) -> Result<Pin<Box<dyn Stream<Item = Result<R>>>>>
+where
+    S: Stream<Item = T> + Send + 'static,
+    O: BulkDmlOperation<T, ResultType = R> + Send + Sync + 'static,
+    R: Send + 'static,
+    T: SObjectRepresentation,
+{
+    let parallelism_degree = if let Some(count) = parallel { count } else { 1 };
+
+    let mut rx = parallelize_dml(
+        stream,
+        conn.clone(),
+        batch_size,
+        all_or_none,
+        parallelism_degree,
+        operation,
+    );
+    let s = stream! {
+        while let Some(value) = rx.recv().await {
+            // `value` is a Future resolving to a Result<Vec<Result<SalesforceId>>>
+            let value = value.await??;
+            for r in value {
+                yield r;
+            }
+        }
+    };
+
+    Ok(Box::pin(s))
 }
 
 impl<K, T> SObjectStream<T> for K
@@ -102,38 +268,66 @@ where
         all_or_none: bool,
         parallel: Option<usize>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>>>>> {
-        // Desired behavior:
-        // We spawn a future for each chunk as it becomes available
-        // We immediately return a Stream that yields results in order
-        // as chunks complete.
-        // The Stream needs to be able to yield from a Stream of Futures
-        // that resolve to Result<Vec<Result>>
-        // and needs to know when it has all of the Futures
+        run_dml(
+            self,
+            conn,
+            batch_size,
+            all_or_none,
+            parallel,
+            CreateOperation {},
+        )
+    }
 
-        // We need to consume the source stream independently of the result
-        // stream being polled.
-        // `parallel` lets us control the degree of parallelism (and consequent memory usage)
+    fn update_all(
+        self,
+        conn: &Connection,
+        batch_size: usize,
+        all_or_none: bool,
+        parallel: Option<usize>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>>>>> {
+        run_dml(
+            self,
+            conn,
+            batch_size,
+            all_or_none,
+            parallel,
+            UpdateOperation {},
+        )
+    }
 
-        match parallel {
-            Some(parallel) => {
-                let mut rx =
-                    parallelize_creates(self, conn.clone(), batch_size, all_or_none, parallel);
-                let s = stream! {
-                    while let Some(value) = rx.recv().await {
-                        // `value` is a Future (a `JoinHandle`, specifically) resolving to a Result<Vec<Result<SalesforceId>>>
-                        let value = value.await??;
-                        for r in value {
-                            yield r;
-                        }
-                    }
-                };
+    fn upsert_all(
+        self,
+        conn: &Connection,
+        external_id: String,
+        batch_size: usize,
+        all_or_none: bool,
+        parallel: Option<usize>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>>>>> {
+        run_dml(
+            self,
+            conn,
+            batch_size,
+            all_or_none,
+            parallel,
+            UpsertOperation { external_id },
+        )
+    }
 
-                Ok(Box::pin(s))
-            }
-            _ => {
-                todo!()
-            }
-        }
+    fn delete_all(
+        self,
+        conn: &Connection,
+        batch_size: usize,
+        all_or_none: bool,
+        parallel: Option<usize>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>>>>> {
+        run_dml(
+            self,
+            conn,
+            batch_size,
+            all_or_none,
+            parallel,
+            DeleteOperation {},
+        )
     }
 }
 
