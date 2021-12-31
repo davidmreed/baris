@@ -2,7 +2,10 @@ use std::marker::PhantomData;
 
 use crate::{
     api::{CompositeFriendlyRequest, SalesforceRequest},
-    data::{SObjectDeserialization, SObjectSerialization, SObjectWithId},
+    data::{
+        SObjectDeserialization, SObjectRepresentation, SObjectSerialization, SObjectWithId,
+        TypedSObject,
+    },
     Connection, SObjectType, SalesforceError, SalesforceId,
 };
 
@@ -16,6 +19,8 @@ use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use tokio::{spawn, sync::mpsc, task::JoinHandle};
 
+use self::traits::SObjectCollection;
+
 use super::DmlResult;
 
 pub mod traits;
@@ -25,46 +30,38 @@ mod test;
 
 #[async_trait]
 pub trait SObjectStream<T> {
-    async fn create_all(
-        &mut self,
+    async fn create(
+        mut self,
         conn: &Connection,
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Box<dyn Stream<Item = Result<T>>>>;
+    ) -> Result<Box<dyn Stream<Item = Result<SalesforceId>>>>;
 }
 
 async fn run_create<T>(
-    sobjects: T,
+    mut sobjects: Vec<T>,
     conn: Connection,
     all_or_none: bool,
 ) -> Result<Vec<Result<SalesforceId>>>
 where
-    T: SObjectCollection,
+    T: SObjectRepresentation,
 {
-    // Perform the create operation,
-    // and assemble a result set that includes the record data
-    // (since our caller likely doesn't have it other
-    // than the source stream).
-    // Our result type will be Vec<Result<T>>
+    // TODO: Using the SObjectCollections trait isn't maximally efficient -
+    // it mutates the receiver, but we don't need it to in this context.
     let result = sobjects.create(conn, all_or_none).await;
 
-    if let Ok(results) = result {
-        // The overall API call succeeded.
-        // Generate a result vector
-        results
-            .iter()
-            .enumerate()
-            .map(|(i, r)| {
-                if r.is_ok() {
-                    Ok(results[i].get_id().unwrap())
-                } else {
-                    Err(r.into())
-                }
-            })
-            .collect()
-    } else {
-        todo!()
+    match result {
+        Ok(results) => {
+            // The overall API call succeeded.
+            // Generate a result vector
+            Ok(results
+                .into_iter()
+                .enumerate()
+                .map(|(i, r)| r.map(|_| sobjects[i].get_opt_id().unwrap()))
+                .collect())
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -76,19 +73,19 @@ async fn parallelize_creates<T, K>(
     parallel: usize,
 ) -> mpsc::Receiver<JoinHandle<Result<Vec<Result<SalesforceId>>>>>
 where
-    T: Stream<Item = K>,
-    K: SObjectRepresentation,
+    T: Stream<Item = K> + Send + 'static,
+    K: SObjectRepresentation + 'static,
 {
     let (tx, rx) = mpsc::channel(parallel);
     let conn = connection.clone();
 
-    sobjects.chunks(batch_size).then(|c| async move {
-        // For each chunk, spawn a new task to execute its creation,
-        // and relay the handle for that task over our channel so the result
-        // stream can await on it.
+    let mut chunks = Box::pin(sobjects.chunks(batch_size));
 
-        tx.send(spawn(run_create(c, conn.clone(), all_or_none)))
-            .await
+    spawn(async move {
+        while let Some(chunk) = chunks.next().await {
+            tx.send(spawn(run_create(chunk, conn.clone(), all_or_none)))
+                .await;
+        }
     });
 
     rx
@@ -97,16 +94,16 @@ where
 #[async_trait]
 impl<K, T> SObjectStream<T> for K
 where
-    K: Stream<Item = T> + Send,
-    T: SObjectRepresentation,
+    K: Stream<Item = T> + Send + 'static,
+    T: SObjectRepresentation + 'static,
 {
-    async fn create_all(
-        &mut self,
+    async fn create(
+        mut self,
         conn: &Connection,
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Box<dyn Stream<Item = Result<T>>>> {
+    ) -> Result<Box<dyn Stream<Item = Result<SalesforceId>>>> {
         // Desired behavior:
         // We spawn a future for each chunk as it becomes available
         // We immediately return a Stream that yields results in order
@@ -119,63 +116,29 @@ where
         // stream being polled.
         // `parallel` lets us control the degree of parallelism (and consequent memory usage)
 
-        if let Some(parallel) = parallel {
-            let (tx, rx) = mpsc::channel(parallel);
-            let conn = conn.clone();
-
-            spawn(async move {
-                self.chunks(batch_size).then(|c| async move {
-                    // For each chunk, spawn a new task to execute its creation,
-                    // and relay the handle for that task over our channel so the result
-                    // stream can await on it.
-
-                    let task_handle = spawn(async move {
-                        // Perform the create operation,
-                        // and assemble a result set that includes the record data
-                        // (since our caller likely doesn't have it other
-                        // than the source stream).
-                        // Our result type will be Vec<Result<T>>
-                        let result = c.create(conn, all_or_none).await;
-
-                        if let Ok(results) = result {
-                            // The overall API call succeeded.
-                            // Generate a result vector
-                            results
-                                .iter()
-                                .enumerate()
-                                .map(|(i, r)| {
-                                    if r.is_ok() {
-                                        Ok(results[i])
-                                    } else {
-                                        Err(r.into())
-                                    }
-                                })
-                                .collect()
-                        } else {
-                            todo!()
+        match parallel {
+            Some(parallel) => {
+                let mut rx =
+                    parallelize_creates(self, conn.clone(), batch_size, all_or_none, parallel)
+                        .await;
+                let s = stream! {
+                    while let Some(value) = rx.recv().await {
+                        // `value` is a Future (a `JoinHandle`, specifically) resolving to a Result<Vec<Result<SalesforceId>>>
+                        let value = value.await??;
+                        for r in value {
+                            yield r;
                         }
-                    });
-
-                    tx.send(task_handle)
-                })
-            });
-
-            let s = stream! {
-                while let Some(value) = rx.recv() {
-                    let value = value.await?;
-                    // `value` is a Future resolving to a Vec<Result>
-                    for r in value.await? {
-                        yield r;
                     }
-                }
-            };
-            Ok(Box::new(s))
-        } else {
-            todo!()
+                };
+
+                Ok(Box::new(s))
+            }
+            _ => {
+                todo!()
+            }
         }
     }
 }
-
 
 pub struct SObjectCollectionCreateRequest {
     records: Vec<Value>,
@@ -388,7 +351,7 @@ impl CompositeFriendlyRequest for SObjectCollectionUpdateRequest {}
 pub struct SObjectCollectionUpsertRequest {
     objects: Vec<Value>,
     external_id: String,
-    sobject_type: SObjectType,
+    sobject_type: String,
     all_or_none: bool,
 }
 
@@ -396,7 +359,7 @@ impl SObjectCollectionUpsertRequest {
     pub fn new_raw(
         objects: Vec<Value>,
         external_id: String,
-        sobject_type: SObjectType,
+        sobject_type: String,
         all_or_none: bool,
     ) -> Self {
         Self {
@@ -406,19 +369,19 @@ impl SObjectCollectionUpsertRequest {
             all_or_none,
         }
     }
-    pub fn new<T>(
-        objects: &Vec<T>,
-        sobject_type: &SObjectType,
-        external_id: &str,
-        all_or_none: bool,
-    ) -> Result<Self>
+    pub fn new<T>(objects: &Vec<T>, external_id: &str, all_or_none: bool) -> Result<Self>
     where
-        T: SObjectSerialization,
+        T: SObjectSerialization + TypedSObject,
     {
-        if objects.len() > 200 {
+        if objects.len() > 200 || objects.len() == 0 {
             return Err(SalesforceError::SObjectCollectionError.into());
         }
-        // TODO: validate that all provided objects are of type sobject_type
+        let sobject_type = objects[0].get_api_name().to_owned();
+
+        // TODO: comparison should not be case-sensitive.
+        if !objects.iter().all(|s| s.get_api_name() == sobject_type) {
+            return Err(SalesforceError::SObjectCollectionError.into()); // TODO: more speciifc error.
+        }
 
         Ok(Self::new_raw(
             objects
@@ -426,7 +389,7 @@ impl SObjectCollectionUpsertRequest {
                 .map(|s| s.to_value_with_options(true, false))
                 .collect::<Result<Vec<Value>>>()?,
             external_id.to_owned(),
-            sobject_type.clone(),
+            sobject_type,
             all_or_none,
         ))
     }
@@ -445,8 +408,7 @@ impl SalesforceRequest for SObjectCollectionUpsertRequest {
     fn get_url(&self) -> String {
         format!(
             "composite/sobjects/{}/{}",
-            self.sobject_type.get_api_name(),
-            self.external_id
+            self.sobject_type, self.external_id
         )
     }
 
