@@ -3,7 +3,7 @@ use bytes::{BufMut, BytesMut};
 use futures::StreamExt;
 
 use crate::{
-    rest::{collections::traits::SObjectCollectionDynamicallyTyped, query::traits::Queryable},
+    rest::{collections::traits::SObjectCollection, query::traits::Queryable},
     test_integration_base::get_test_connection,
 };
 

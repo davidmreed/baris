@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, pin::Pin};
 
 use crate::{
     api::{CompositeFriendlyRequest, SalesforceRequest},
@@ -28,15 +28,14 @@ pub mod traits;
 #[cfg(test)]
 mod test;
 
-#[async_trait]
 pub trait SObjectStream<T> {
-    async fn create(
-        mut self,
+    fn create_all(
+        self,
         conn: &Connection,
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Box<dyn Stream<Item = Result<SalesforceId>>>>;
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>>>>>;
 }
 
 async fn run_create<T>(
@@ -65,7 +64,7 @@ where
     }
 }
 
-async fn parallelize_creates<T, K>(
+fn parallelize_creates<T, K>(
     sobjects: T,
     connection: Connection,
     batch_size: usize,
@@ -91,19 +90,18 @@ where
     rx
 }
 
-#[async_trait]
 impl<K, T> SObjectStream<T> for K
 where
     K: Stream<Item = T> + Send + 'static,
     T: SObjectRepresentation + 'static,
 {
-    async fn create(
-        mut self,
+    fn create_all(
+        self,
         conn: &Connection,
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Box<dyn Stream<Item = Result<SalesforceId>>>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>>>>> {
         // Desired behavior:
         // We spawn a future for each chunk as it becomes available
         // We immediately return a Stream that yields results in order
@@ -119,8 +117,7 @@ where
         match parallel {
             Some(parallel) => {
                 let mut rx =
-                    parallelize_creates(self, conn.clone(), batch_size, all_or_none, parallel)
-                        .await;
+                    parallelize_creates(self, conn.clone(), batch_size, all_or_none, parallel);
                 let s = stream! {
                     while let Some(value) = rx.recv().await {
                         // `value` is a Future (a `JoinHandle`, specifically) resolving to a Result<Vec<Result<SalesforceId>>>
@@ -131,7 +128,7 @@ where
                     }
                 };
 
-                Ok(Box::new(s))
+                Ok(Box::pin(s))
             }
             _ => {
                 todo!()
