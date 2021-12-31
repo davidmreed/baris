@@ -1,26 +1,26 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    marker::PhantomData,
-};
+use std::{collections::VecDeque, marker::PhantomData};
 
 use anyhow::Result;
-use async_trait::async_trait;
 use reqwest::Method;
 use serde_derive::Deserialize;
 use serde_json::{Map, Value};
 use tokio::{spawn, task::JoinHandle};
-use tokio_stream::StreamExt;
 
 use crate::{
     api::SalesforceRequest,
-    data::SObjectCreation,
+    data::SObjectDeserialization,
     streams::{ResultStream, ResultStreamManager, ResultStreamState},
     Connection, SObjectType, SalesforceError,
 };
 
+pub mod traits;
+
+#[cfg(test)]
+mod test;
+
 pub struct AggregateResult(Map<String, Value>);
 
-impl SObjectCreation for AggregateResult {
+impl SObjectDeserialization for AggregateResult {
     fn from_value(value: &Value, _sobjecttype: &SObjectType) -> Result<Self> {
         if let Value::Object(map) = value {
             Ok(AggregateResult { 0: map.clone() }) // TODO: don't clone.
@@ -29,57 +29,6 @@ impl SObjectCreation for AggregateResult {
         }
     }
 }
-
-#[async_trait]
-pub trait Queryable: SObjectCreation + Send + Sync + Unpin + 'static {
-    async fn query(
-        conn: &Connection,
-        sobject_type: &SObjectType,
-        query: &str,
-        all: bool,
-    ) -> Result<ResultStream<Self>> {
-        let request = QueryRequest::new(query, all);
-
-        Ok(conn
-            .execute(&request)
-            .await?
-            .to_result_stream(conn, sobject_type)?)
-    }
-
-    async fn aggregate_query(
-        conn: &Connection,
-        sobject_type: &SObjectType,
-        query: &str,
-        all: bool,
-    ) -> Result<ResultStream<AggregateResult>> {
-        let request = QueryRequest::new(query, all);
-
-        Ok(conn
-            .execute(&request)
-            .await?
-            .to_result_stream(conn, sobject_type)?)
-    }
-
-    async fn count_query(conn: &Connection, query: &str, all: bool) -> Result<usize> {
-        let request = QueryRequest::new(query, all);
-
-        Ok(conn.execute(&request).await?.total_size)
-    }
-
-    async fn query_vec(
-        conn: &Connection,
-        sobject_type: &SObjectType,
-        query: &str,
-        all: bool,
-    ) -> Result<Vec<Self>> {
-        Ok(Self::query(conn, sobject_type, query, all)
-            .await?
-            .collect::<Result<Vec<Self>>>()
-            .await?)
-    }
-}
-
-impl<T> Queryable for T where T: SObjectCreation + Send + Sync + Unpin + 'static {}
 
 pub struct QueryRequest {
     query: String,
@@ -143,7 +92,7 @@ impl QueryResult {
         sobject_type: &SObjectType,
     ) -> Result<ResultStream<T>>
     where
-        T: SObjectCreation + Sync + Send + Unpin + 'static,
+        T: SObjectDeserialization + Sync + Send + Unpin + 'static,
     {
         Ok(ResultStream::new(
             Some(self.to_result_stream_state(sobject_type)?),
@@ -160,7 +109,7 @@ impl QueryResult {
         sobject_type: &SObjectType,
     ) -> Result<ResultStreamState<T>>
     where
-        T: SObjectCreation + Sync + Send + Unpin + 'static,
+        T: SObjectDeserialization + Sync + Send + Unpin + 'static,
     {
         Ok(ResultStreamState::new(
             self.records
@@ -174,7 +123,7 @@ impl QueryResult {
     }
 }
 
-struct QueryStreamLocatorManager<T: SObjectCreation + Unpin> {
+struct QueryStreamLocatorManager<T: SObjectDeserialization + Unpin> {
     conn: Connection,
     sobject_type: SObjectType,
     phantom: PhantomData<T>,
@@ -182,7 +131,7 @@ struct QueryStreamLocatorManager<T: SObjectCreation + Unpin> {
 
 impl<T> ResultStreamManager for QueryStreamLocatorManager<T>
 where
-    T: SObjectCreation + Unpin + Send + Sync + 'static, // TODO: why is this lifetime required?
+    T: SObjectDeserialization + Unpin, // TODO: why is this lifetime required?
 {
     type Output = T;
 

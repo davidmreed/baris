@@ -2,15 +2,20 @@
 name = "baris"
 version = "0.1.0"
 authors = ["David Reed <david@ktema.org>"]
-edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+edition = "2021"
+license = "BSD-2-Clause"
+description = "Async Salesforce API interactions"
+readme = "README.md"
+homepage = "https://github.com/davidmreed/baris"
+repository = "https://github.com/davidmreed/baris"
+keywords = ["salesforce"]
 
 [dependencies]
-reqwest = {version = "0.11", features = ["json"]}
+reqwest = {version = "0.11", features = ["json", "stream"]}
 serde="1.0.104"
 serde_json="1.0"
 serde_derive="1.0"
+serde_urlencoded="0.7.0"
 anyhow="1.0"
 tokio = { version = "1.4.0", features = ["macros", "rt-multi-thread", "time", "sync"] }
 tokio-stream = "0.1"
@@ -20,6 +25,7 @@ async-trait = "0.1"
 async-stream = "0.3.2"
 futures = "0.3"
 itertools = "0.10"
+bytes = "1.1.0"
 
 [lib]
 name = "baris"

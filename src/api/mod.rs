@@ -14,9 +14,13 @@ use crate::auth::Authentication;
 use crate::rest::describe::{SObjectDescribe, SObjectDescribeRequest};
 
 use anyhow::{Error, Result};
-use reqwest::{header, Client, Method, RequestBuilder, StatusCode, Url};
+use async_trait::async_trait;
+use reqwest::{header, Client, Method, RequestBuilder, Response, StatusCode, Url};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
+
+#[cfg(test)]
+mod test;
 
 pub trait SalesforceRequest {
     type ReturnValue;
@@ -33,6 +37,24 @@ pub trait SalesforceRequest {
     }
 
     fn get_result(&self, conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue>;
+}
+
+#[async_trait]
+pub(crate) trait SalesforceRawRequest {
+    type ReturnValue;
+
+    fn get_body(&self) -> Option<Value> {
+        None
+    }
+
+    fn get_url(&self) -> String;
+    fn get_method(&self) -> Method;
+
+    fn get_query_parameters(&self) -> Option<Value> {
+        None
+    }
+
+    async fn get_result(&self, conn: &Connection, response: Response) -> Result<Self::ReturnValue>;
 }
 
 pub trait CompositeFriendlyRequest: SalesforceRequest {}
@@ -86,9 +108,13 @@ impl Connection {
         let lock = self.auth.read().await;
 
         Ok(lock
-            .get_instance_url() // TODO: this is why the refresh is in this mehtod (above )
+            .get_instance_url() // TODO: this is why the refresh is in this method (above )
             .await?
-            .join(&format!("/services/data/{}/", self.api_version))?)
+            .join(&self.get_base_url_path())?)
+    }
+
+    pub fn get_base_url_path(&self) -> String {
+        format!("/services/data/{}/", self.api_version)
     }
 
     pub async fn get_access_token(&self) -> Result<String> {
@@ -144,7 +170,7 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn get_type(&mut self, type_name: &str) -> Result<SObjectType> {
+    pub async fn get_type(&self, type_name: &str) -> Result<SObjectType> {
         let mut sobject_types = self.sobject_types.write().await;
 
         if !sobject_types.contains_key(type_name) {
@@ -168,6 +194,7 @@ impl Connection {
     }
 
     pub async fn get_client(&self) -> Result<Client> {
+        // TODO: it is more efficient to cache the client for connection pooling.
         let mut headers = header::HeaderMap::new();
 
         headers.insert(
@@ -183,7 +210,6 @@ impl Connection {
         K: SalesforceRequest,
     {
         let url = self.get_base_url().await?.join(&request.get_url())?;
-        println!("I have URL {}", url);
 
         let mut builder = self.get_client().await?.request(request.get_method(), url);
 
@@ -202,6 +228,49 @@ impl Connection {
         Ok(builder)
     }
 
+    // The following violates DRY but is challenging to express due to the two-trait structure.
+    // TODO: figure out how to do a blanket impl of SalesforceRawRequest for SalesforceRequest
+    // without impacting the external-facing API.
+
+    async fn build_raw_request<K>(&self, request: &K) -> Result<RequestBuilder>
+    where
+        K: SalesforceRawRequest,
+    {
+        let url = self.get_base_url().await?.join(&request.get_url())?;
+
+        let mut builder = self.get_client().await?.request(request.get_method(), url);
+
+        let method = request.get_method();
+
+        if method == Method::POST || method == Method::PUT || method == Method::PATCH {
+            if let Some(body) = request.get_body() {
+                builder = builder.json(&body);
+            }
+        }
+
+        if let Some(params) = request.get_query_parameters() {
+            builder = builder.query(&params);
+        }
+
+        Ok(builder)
+    }
+
+    pub(crate) async fn execute_raw_request<K, T>(&self, request: &K) -> Result<T>
+    where
+        K: SalesforceRawRequest<ReturnValue = T>,
+    {
+        let mut result = self.build_raw_request(request).await?.send().await?;
+
+        // If the token is expired, refresh it and try again.
+        if result.status().as_u16() == 401 {
+            self.refresh_access_token().await?;
+            result = self.build_raw_request(request).await?.send().await?
+        }
+        result = result.error_for_status()?;
+
+        request.get_result(self, result).await
+    }
+
     pub async fn execute<K, T>(&self, request: &K) -> Result<T>
     where
         K: SalesforceRequest<ReturnValue = T>,
@@ -214,7 +283,8 @@ impl Connection {
             result = self.build_request(request).await?.send().await?
         }
 
-        let result = result.error_for_status()?;
+        // TODO: we don't consume any error details returned in the case of a 400.
+        result = result.error_for_status()?;
 
         if result.status() == StatusCode::NO_CONTENT {
             Ok(request.get_result(&self, None)?)

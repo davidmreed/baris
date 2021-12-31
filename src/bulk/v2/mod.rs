@@ -1,6 +1,6 @@
 use serde_derive::{Deserialize, Serialize};
 use std::marker::PhantomData;
-use std::{collections::HashMap, ops::Deref, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::Result;
 use serde_json::json;
@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use tokio::task::{spawn, JoinHandle};
 use tokio::time::sleep;
 
-use crate::data::SObjectRepresentation;
+use crate::data::SObjectDeserialization;
 use crate::streams::value_from_csv;
 use crate::{
     data::DateTime,
@@ -16,18 +16,12 @@ use crate::{
     Connection, SObjectType, SalesforceError, SalesforceId,
 };
 
+mod traits;
+
+#[cfg(test)]
+mod test;
+
 const POLL_INTERVAL: u64 = 10;
-
-#[derive(Copy, Clone)]
-pub struct BulkQueryJob(SalesforceId);
-
-impl Deref for BulkQueryJob {
-    type Target = SalesforceId;
-
-    fn deref(&self) -> &Self::Target {
-        return &self.0;
-    }
-}
 
 #[derive(Serialize, Deserialize, PartialEq)]
 pub enum BulkJobStatus {
@@ -70,7 +64,8 @@ pub enum BulkApiColumnDelimiter {
 
 #[derive(Serialize, Deserialize, PartialEq)]
 pub enum BulkApiConcurrencyMode {
-    Parallel, // This type uses uppercase
+    // This type uses uppercase, so no serde-renaming required.
+    Parallel,
 }
 
 #[derive(Serialize, Deserialize, PartialEq)]
@@ -80,7 +75,7 @@ pub enum BulkApiContentType {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BulkQueryJobDetail {
+pub struct BulkQueryJob {
     id: SalesforceId,
     operation: BulkQueryOperation,
     object: String,
@@ -97,8 +92,8 @@ pub struct BulkQueryJobDetail {
 
 const RESULTS_CHUNK_SIZE: u32 = 2000;
 
-struct BulkQueryLocatorManager<T: SObjectRepresentation> {
-    job: BulkQueryJob,
+struct BulkQueryLocatorManager<T: SObjectDeserialization> {
+    job_id: SalesforceId,
     conn: Connection,
     sobject_type: SObjectType,
     phantom: PhantomData<T>,
@@ -106,7 +101,7 @@ struct BulkQueryLocatorManager<T: SObjectRepresentation> {
 
 impl<T> ResultStreamManager for BulkQueryLocatorManager<T>
 where
-    T: SObjectRepresentation,
+    T: SObjectDeserialization + Send + Sync + 'static,
 {
     type Output = T;
 
@@ -116,7 +111,7 @@ where
     ) -> JoinHandle<Result<ResultStreamState<T>>> {
         let conn = self.conn.clone();
         let sobject_type = self.sobject_type.clone();
-        let job_id = *self.job;
+        let job_id = self.job_id.clone();
 
         spawn(async move {
             let url = conn
@@ -142,6 +137,7 @@ where
                 .send()
                 .await?
                 .error_for_status()?;
+            // TODO: make request struct
 
             let headers = result.headers();
 
@@ -189,9 +185,9 @@ impl BulkQueryJob {
         query: &str,
         operation: BulkQueryOperation,
     ) -> Result<Self> {
-        let url = conn.get_base_url().await?.join("/jobs/query")?;
+        let url = conn.get_base_url().await?.join("jobs/query")?;
 
-        let result = conn
+        Ok(conn
             .get_client()
             .await?
             .post(url)
@@ -200,22 +196,22 @@ impl BulkQueryJob {
                 "query": query,
             }))
             .send()
-            .await?; // TODO need to handle HTTP status here and elsewhere.
-
-        let val: BulkQueryJobDetail = result.json().await?;
-
-        return Ok(BulkQueryJob(val.id));
+            .await?
+            .error_for_status()?
+            .json()
+            .await?)
+        // TODO: handle token refresh - this should be a Request struct
     }
 
     pub async fn abort(&self, _conn: &Connection) -> Result<()> {
         todo!();
     }
 
-    pub async fn check_status(&self, conn: &Connection) -> Result<BulkQueryJobDetail> {
+    pub async fn check_status(&self, conn: &Connection) -> Result<BulkQueryJob> {
         let url = conn
             .get_base_url()
             .await?
-            .join(&format!("/jobs/query/{}", self.0))?;
+            .join(&format!("jobs/query/{}", self.id))?;
 
         Ok(conn
             .get_client()
@@ -223,25 +219,22 @@ impl BulkQueryJob {
             .get(url)
             .send()
             .await?
+            .error_for_status()?
             .json()
             .await?)
+        // TODO: make Request struct
     }
 
-    pub async fn complete(self, conn: &Connection) -> Result<BulkQueryJobDetail> {
-        let conn = conn.clone();
+    pub async fn complete(self, conn: &Connection) -> Result<BulkQueryJob> {
+        loop {
+            let status: BulkQueryJob = self.check_status(&conn).await?;
 
-        spawn(async move {
-            loop {
-                let status: BulkQueryJobDetail = self.check_status(&conn).await?;
-
-                if status.state.is_completed_state() {
-                    return Ok(status);
-                }
-
-                sleep(Duration::from_secs(POLL_INTERVAL)).await;
+            if status.state.is_completed_state() {
+                return Ok(status);
             }
-        })
-        .await?
+
+            sleep(Duration::from_secs(POLL_INTERVAL)).await;
+        }
     }
 
     pub async fn get_results_stream<T: 'static>(
@@ -251,12 +244,12 @@ impl BulkQueryJob {
         sobject_type: &SObjectType,
     ) -> ResultStream<T>
     where
-        T: SObjectRepresentation + Unpin,
+        T: SObjectDeserialization + Unpin + Send + Sync,
     {
         ResultStream::new(
             None,
             Box::new(BulkQueryLocatorManager {
-                job: *self,
+                job_id: self.id,
                 sobject_type: sobject_type.clone(),
                 conn: conn.clone(),
                 phantom: PhantomData,

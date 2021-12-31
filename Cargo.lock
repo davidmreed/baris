@@ -53,6 +53,7 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
+ "bytes",
  "chrono",
  "csv",
  "futures",
@@ -61,6 +62,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "serde_urlencoded",
  "tokio",
  "tokio-stream",
 ]

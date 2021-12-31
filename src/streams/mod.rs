@@ -11,7 +11,10 @@ use serde_json::{Map, Value};
 use tokio::task::JoinHandle;
 use tokio_stream::Stream;
 
-use crate::{data::SObjectCreation, FieldValue, SObjectType};
+use crate::{data::SObjectDeserialization, FieldValue, SObjectType};
+
+#[cfg(test)]
+mod test;
 
 pub fn value_from_csv(rec: &HashMap<String, String>, sobjecttype: &SObjectType) -> Result<Value> {
     let mut ret = Map::new();
@@ -21,15 +24,15 @@ pub fn value_from_csv(rec: &HashMap<String, String>, sobjecttype: &SObjectType) 
         if k != "attributes" {
             let describe = sobjecttype.get_describe().get_field(k).unwrap();
             let f = &FieldValue::from_str(rec.get(k).unwrap(), &describe.soap_type)?;
-            ret.insert(k.to_lowercase(), f.into());
+            // Use the field describe to canonicalize the case of the field.
+            ret.insert(describe.name.clone(), f.into());
         }
     }
-
     Ok(Value::Object(ret))
 }
 
 pub(crate) trait ResultStreamManager: Send + Sync {
-    type Output: SObjectCreation + Send + Sync;
+    type Output: SObjectDeserialization;
 
     fn get_next_future(
         &mut self,
@@ -37,7 +40,7 @@ pub(crate) trait ResultStreamManager: Send + Sync {
     ) -> JoinHandle<Result<ResultStreamState<Self::Output>>>;
 }
 
-pub(crate) struct ResultStreamState<T: SObjectCreation + Send + Sync> {
+pub(crate) struct ResultStreamState<T: SObjectDeserialization> {
     pub buffer: VecDeque<T>, // TODO: we should decouple the buffer from the locator state to enable prefetching
     pub locator: Option<String>,
     pub total_size: Option<usize>,
@@ -46,7 +49,7 @@ pub(crate) struct ResultStreamState<T: SObjectCreation + Send + Sync> {
 
 impl<T> ResultStreamState<T>
 where
-    T: SObjectCreation + Send + Sync,
+    T: SObjectDeserialization,
 {
     pub fn new(
         buffer: VecDeque<T>,
@@ -63,7 +66,7 @@ where
     }
 }
 
-pub struct ResultStream<T: SObjectCreation + Send + Sync + Unpin> {
+pub struct ResultStream<T: SObjectDeserialization + Unpin> {
     manager: Box<dyn ResultStreamManager<Output = T>>,
     state: Option<ResultStreamState<T>>,
     yielded: usize,
@@ -73,7 +76,7 @@ pub struct ResultStream<T: SObjectCreation + Send + Sync + Unpin> {
 
 impl<T> ResultStream<T>
 where
-    T: SObjectCreation + Send + Sync + Unpin,
+    T: SObjectDeserialization + Unpin,
 {
     pub(crate) fn new(
         initial_values: Option<ResultStreamState<T>>,
@@ -104,7 +107,7 @@ where
 
 impl<T> Stream for ResultStream<T>
 where
-    T: SObjectCreation + Send + Sync + Unpin,
+    T: SObjectDeserialization + Unpin,
 {
     type Item = Result<T>;
 

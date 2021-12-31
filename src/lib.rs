@@ -10,9 +10,10 @@ pub use crate::api::Connection;
 pub mod auth;
 pub mod bulk;
 pub mod rest;
+pub mod tooling;
 
 #[cfg(test)]
-mod test_integration;
+mod test_integration_base;
 
 extern crate chrono;
 extern crate csv;
