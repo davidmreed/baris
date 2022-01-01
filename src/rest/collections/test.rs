@@ -7,7 +7,7 @@ use super::SObjectStream;
 
 #[tokio::test]
 #[ignore]
-async fn test_collection_streams() -> Result<()> {
+async fn test_collection_stream_create() -> Result<()> {
     let conn = get_test_connection()?;
 
     let mut stream = iter(0..1000)
@@ -26,6 +26,43 @@ async fn test_collection_streams() -> Result<()> {
     }
 
     assert_eq!(1000, count);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_collection_stream_update() -> Result<()> {
+    let conn = get_test_connection()?;
+
+    let mut stream = iter(0..100)
+        .map(|i| Account { id: None, name: format!("Account {}", i) })
+        .create_all(&conn, 20, true, Some(5))?
+        .map(|r| Account { id: Some(r?), name: "Updated" })
+        .update_all(&conn, 20, true, Some(5))?;
+
+    while let Some(r) = stream.next().await {
+        assert!(r.is_ok());
+    }
+
+    Ok(())
+}
+
+
+#[tokio::test]
+#[ignore]
+async fn test_collection_stream_create_delete() -> Result<()> {
+    let conn = get_test_connection()?;
+
+    let mut stream = iter(0..100)
+        .map(|i| Account { id: None, name: format!("Account {}", i) })
+        .create_all(&conn, 20, true, Some(5))?
+        .map(|r| Account { id: Some(r?), name: "".to_owned() })
+        .delete_all(&conn, 20, true, Some(5))?;
+
+    while let Some(r) = stream.next().await {
+        assert!(r.is_ok());
+    }
 
     Ok(())
 }
