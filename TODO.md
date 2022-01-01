@@ -1,10 +1,12 @@
 Cactusforce
 
 - Open source
-- Add support for Bulk DML or Parallel Streams or both
+- Add support for Bulk DML
+- Fix the Bulk API tests (?)
 - [Ideal] We should implement sObject Collections DML on collections other than Vecs, as well as iterators.
 - [Ideal] Build prelude
-- Fix the Bulk API tests (?)
+- [Ideal] Allow Delete streams to accept Item = SalesforceId (will require decomposing the trait )
+- [Ideal] Build example web client
 
 MVP
 
