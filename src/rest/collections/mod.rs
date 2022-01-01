@@ -33,7 +33,7 @@ pub trait SObjectStream<T> {
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>>>>>;
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>> + Send>>>;
 
     fn update_all(
         self,
@@ -41,7 +41,7 @@ pub trait SObjectStream<T> {
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>>>>>;
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>> + Send>>>;
 
     fn upsert_all(
         self,
@@ -50,7 +50,7 @@ pub trait SObjectStream<T> {
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>>>>>;
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>> + Send>>>;
 
     fn delete_all(
         self,
@@ -58,7 +58,7 @@ pub trait SObjectStream<T> {
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>>>>>;
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>> + Send>>>;
 }
 
 #[async_trait]
@@ -226,7 +226,7 @@ fn run_dml<S, O, R, T>(
     all_or_none: bool,
     parallel: Option<usize>,
     operation: O,
-) -> Result<Pin<Box<dyn Stream<Item = Result<R>>>>>
+) -> Result<Pin<Box<dyn Stream<Item = Result<R>> + Send>>>
 where
     S: Stream<Item = T> + Send + 'static,
     O: BulkDmlOperation<T, ResultType = R> + Send + Sync + 'static,
@@ -267,7 +267,7 @@ where
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>>>>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>> + Send>>> {
         run_dml(
             self,
             conn,
@@ -284,7 +284,7 @@ where
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>>>>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>> + Send>>> {
         run_dml(
             self,
             conn,
@@ -302,7 +302,7 @@ where
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>>>>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<SalesforceId>> + Send>>> {
         run_dml(
             self,
             conn,
@@ -319,7 +319,7 @@ where
         batch_size: usize,
         all_or_none: bool,
         parallel: Option<usize>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>>>>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<()>> + Send>>> {
         run_dml(
             self,
             conn,
@@ -484,11 +484,12 @@ impl SObjectCollectionUpdateRequest {
             all_or_none,
         }
     }
+
     pub fn new<T>(objects: &Vec<T>, all_or_none: bool) -> Result<Self>
     where
         T: SObjectSerialization + SObjectWithId,
     {
-        if !objects.iter().all(|s| s.get_id().is_null()) {
+        if !objects.iter().all(|s| !s.get_id().is_null()) {
             return Err(SalesforceError::RecordDoesNotExistError.into());
         }
         if objects.len() > 200 {
@@ -499,7 +500,7 @@ impl SObjectCollectionUpdateRequest {
         Ok(Self::new_raw(
             objects
                 .iter()
-                .map(|s| s.to_value_with_options(true, false))
+                .map(|s| s.to_value_with_options(true, true))
                 .collect::<Result<Vec<Value>>>()?,
             all_or_none,
         ))
