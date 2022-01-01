@@ -1,13 +1,17 @@
+use async_trait::async_trait;
+use bytes::Bytes;
+use reqwest::{Method, Response};
 use serde_derive::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::Result;
-use serde_json::json;
+use serde_json::{Map, Value};
 use std::collections::VecDeque;
 use tokio::task::{spawn, JoinHandle};
 use tokio::time::sleep;
 
+use crate::api::{SalesforceRawRequest, SalesforceRequest};
 use crate::data::SObjectDeserialization;
 use crate::streams::value_from_csv;
 use crate::{
@@ -90,7 +94,7 @@ pub struct BulkQueryJob {
     column_delimiter: BulkApiColumnDelimiter,
 }
 
-const RESULTS_CHUNK_SIZE: u32 = 2000;
+const RESULTS_CHUNK_SIZE: usize = 2000;
 
 struct BulkQueryLocatorManager<T: SObjectDeserialization> {
     job_id: SalesforceId,
@@ -112,54 +116,26 @@ where
         let conn = self.conn.clone();
         let sobject_type = self.sobject_type.clone();
         let job_id = self.job_id.clone();
+        let mut locator = None;
+
+        if let Some(state) = state {
+            if let Some(current_locator) = state.locator {
+                locator = Some(current_locator);
+            }
+        } // TODO: error handling
 
         spawn(async move {
-            let url = conn
-                .get_base_url()
-                .await?
-                .join(&format!("jobs/query/{}/results", job_id))?;
-            let mut query = HashMap::new();
-
-            query.insert("maxRecords", format!("{}", RESULTS_CHUNK_SIZE));
-
-            if let Some(state) = state {
-                if let Some(current_locator) = state.locator {
-                    // TODO errors
-                    query.insert("locator", current_locator);
-                }
-            }
-
             let result = conn
-                .get_client()
-                .await?
-                .get(url)
-                .query(&query)
-                .send()
-                .await?
-                .error_for_status()?;
-            // TODO: make request struct
-
-            let headers = result.headers();
-
-            // Ingest the headers that contain our next locator.
-            let locator_header = headers
-                .get("Sforce-Locator")
-                .ok_or(SalesforceError::GeneralError(
-                    "No record set locator returned".into(),
-                ))?
-                .to_str()?;
-
-            let (done, locator) = if locator_header == "null" {
-                // The literal string "null" means that we've consumed all of the results.
-                (true, None)
-            } else {
-                (false, Some(locator_header.to_string()))
-            };
+                .execute_raw_request(&BulkQueryJobResultsRequest::new(
+                    job_id,
+                    locator,
+                    RESULTS_CHUNK_SIZE,
+                ))
+                .await?;
 
             // Ingest the CSV records
-            let content = result.bytes().await?;
             // TODO: respect this job's settings for delimiter.
-            let buffer = csv::Reader::from_reader(&*content)
+            let buffer = csv::Reader::from_reader(&*result.content)
                 .into_deserialize::<HashMap<String, String>>()
                 .map(|r| {
                     Ok(T::from_value(
@@ -169,9 +145,10 @@ where
                 })
                 .collect::<Result<VecDeque<T>>>()?;
 
+            let done = result.locator.is_none();
             Ok(ResultStreamState {
                 buffer,
-                locator,
+                locator: result.locator,
                 total_size: None, // TODO
                 done,
             })
@@ -179,50 +156,176 @@ where
     }
 }
 
-impl BulkQueryJob {
-    pub async fn new(
-        conn: &Connection,
-        query: &str,
-        operation: BulkQueryOperation,
-    ) -> Result<Self> {
-        let url = conn.get_base_url().await?.join("jobs/query")?;
+#[derive(Serialize)]
+struct BulkQueryJobCreateRequest {
+    operation: BulkQueryOperation,
+    query: String,
+}
 
+impl BulkQueryJobCreateRequest {
+    pub fn new(query: String, query_all: bool) -> Self {
+        Self {
+            query,
+            operation: if query_all {
+                BulkQueryOperation::QueryAll
+            } else {
+                BulkQueryOperation::Query
+            },
+        }
+    }
+}
+
+impl SalesforceRequest for BulkQueryJobCreateRequest {
+    type ReturnValue = BulkQueryJob;
+
+    fn get_url(&self) -> String {
+        "jobs/query".to_owned()
+    }
+
+    fn get_method(&self) -> reqwest::Method {
+        reqwest::Method::POST
+    }
+
+    fn get_body(&self) -> Option<Value> {
+        serde_json::to_value(&self).ok()
+    }
+
+    fn get_result(
+        &self,
+        _conn: &Connection,
+        body: Option<&serde_json::Value>,
+    ) -> Result<Self::ReturnValue> {
+        if let Some(body) = body {
+            Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
+        } else {
+            Err(SalesforceError::ResponseBodyExpected.into())
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct BulkQueryJobStatusRequest {
+    id: SalesforceId,
+}
+
+impl BulkQueryJobStatusRequest {
+    pub fn new(id: SalesforceId) -> Self {
+        Self { id }
+    }
+}
+
+impl SalesforceRequest for BulkQueryJobStatusRequest {
+    type ReturnValue = BulkQueryJob;
+
+    fn get_url(&self) -> String {
+        format!("jobs/query/{}", self.id)
+    }
+
+    fn get_method(&self) -> Method {
+        Method::GET
+    }
+
+    fn get_result(
+        &self,
+        _conn: &Connection,
+        body: Option<&serde_json::Value>,
+    ) -> Result<Self::ReturnValue> {
+        if let Some(body) = body {
+            Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
+        } else {
+            Err(SalesforceError::ResponseBodyExpected.into())
+        }
+    }
+}
+
+struct BulkQueryJobResultsResponse {
+    locator: Option<String>,
+    content: Bytes,
+}
+
+struct BulkQueryJobResultsRequest {
+    id: SalesforceId,
+    locator: Option<String>,
+    max_records: usize,
+}
+
+impl BulkQueryJobResultsRequest {
+    pub fn new(id: SalesforceId, locator: Option<String>, max_records: usize) -> Self {
+        Self {
+            id,
+            locator,
+            max_records,
+        }
+    }
+}
+
+#[async_trait]
+impl SalesforceRawRequest for BulkQueryJobResultsRequest {
+    type ReturnValue = BulkQueryJobResultsResponse;
+
+    fn get_url(&self) -> String {
+        format!("jobs/query/{}/results", self.id)
+    }
+
+    fn get_method(&self) -> Method {
+        Method::GET
+    }
+
+    fn get_query_parameters(&self) -> Option<Value> {
+        let mut query = Map::new();
+
+        query.insert(
+            "maxRecords".to_owned(),
+            Value::String(format!("{}", self.max_records)),
+        );
+
+        if let Some(current_locator) = &self.locator {
+            // TODO errors
+            query.insert("locator".to_owned(), Value::String(current_locator.clone()));
+        }
+
+        Some(Value::Object(query))
+    }
+
+    async fn get_result(&self, conn: &Connection, response: Response) -> Result<Self::ReturnValue> {
+        let headers = response.headers();
+
+        // Ingest the headers that contain our next locator.
+        let locator_header = headers
+            .get("Sforce-Locator")
+            .ok_or(SalesforceError::GeneralError(
+                "No record set locator returned".into(),
+            ))?
+            .to_str()?;
+
+        Ok(BulkQueryJobResultsResponse {
+            locator: if locator_header == "null" {
+                // The literal string "null" means that we've consumed all of the results.
+                None
+            } else {
+                Some(locator_header.to_string())
+            },
+            content: response.bytes().await?,
+        })
+    }
+}
+
+impl BulkQueryJob {
+    pub async fn create(conn: &Connection, query: &str, query_all: bool) -> Result<Self> {
         Ok(conn
-            .get_client()
-            .await?
-            .post(url)
-            .json(&json!({
-                "operation": operation,
-                "query": query,
-            }))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
+            .execute(&BulkQueryJobCreateRequest::new(query.to_owned(), query_all))
             .await?)
-        // TODO: handle token refresh - this should be a Request struct
     }
 
     pub async fn abort(&self, _conn: &Connection) -> Result<()> {
         todo!();
     }
 
+    // TODO: should this take `&mut self` and replace self, returning Result<()>?
     pub async fn check_status(&self, conn: &Connection) -> Result<BulkQueryJob> {
-        let url = conn
-            .get_base_url()
-            .await?
-            .join(&format!("jobs/query/{}", self.id))?;
-
         Ok(conn
-            .get_client()
-            .await?
-            .get(url)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
+            .execute(&BulkQueryJobStatusRequest::new(self.id))
             .await?)
-        // TODO: make Request struct
     }
 
     pub async fn complete(self, conn: &Connection) -> Result<BulkQueryJob> {

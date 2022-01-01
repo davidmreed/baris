@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use crate::data::{DynamicallyTypedSObject, SObjectDeserialization, SingleTypedSObject};
 use crate::{streams::ResultStream, Connection, SObjectType};
 
-use super::{BulkQueryJob, BulkQueryOperation};
+use super::BulkQueryJob;
 
 #[async_trait]
 pub trait BulkQueryable: DynamicallyTypedSObject + SObjectDeserialization + Unpin {
@@ -14,14 +14,10 @@ pub trait BulkQueryable: DynamicallyTypedSObject + SObjectDeserialization + Unpi
         query: &str,
         all: bool,
     ) -> Result<ResultStream<Self>> {
-        let job = BulkQueryJob::new(
+        let job = BulkQueryJob::create(
             &conn.clone(), // TODO: correct?
             query,
-            if all {
-                BulkQueryOperation::QueryAll
-            } else {
-                BulkQueryOperation::Query
-            },
+            all,
         )
         .await?;
 
@@ -36,14 +32,10 @@ impl<T> BulkQueryable for T where T: DynamicallyTypedSObject + SObjectDeserializ
 #[async_trait]
 pub trait SingleTypeBulkQueryable: SingleTypedSObject + SObjectDeserialization + Unpin {
     async fn bulk_query(conn: &Connection, query: &str, all: bool) -> Result<ResultStream<Self>> {
-        let job = BulkQueryJob::new(
+        let job = BulkQueryJob::create(
             &conn.clone(), // TODO: correct?
             query,
-            if all {
-                BulkQueryOperation::QueryAll
-            } else {
-                BulkQueryOperation::Query
-            },
+            all,
         )
         .await?;
 
