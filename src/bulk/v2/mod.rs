@@ -287,7 +287,7 @@ impl SalesforceRawRequest for BulkQueryJobResultsRequest {
         Some(Value::Object(query))
     }
 
-    async fn get_result(&self, conn: &Connection, response: Response) -> Result<Self::ReturnValue> {
+    async fn get_result(&self, _conn: &Connection, response: Response) -> Result<Self::ReturnValue> {
         let headers = response.headers();
 
         // Ingest the headers that contain our next locator.
@@ -340,14 +340,13 @@ impl BulkQueryJob {
         }
     }
 
-    pub async fn get_results_stream<T: 'static>(
-        // TODO: why is the lifetime required?
+    pub async fn get_results_stream<T>(
         &self,
         conn: &Connection,
         sobject_type: &SObjectType,
     ) -> ResultStream<T>
     where
-        T: SObjectDeserialization + Unpin + Send + Sync,
+        T: SObjectDeserialization + Unpin + Send + Sync + 'static,
     {
         ResultStream::new(
             None,
@@ -358,5 +357,138 @@ impl BulkQueryJob {
                 phantom: PhantomData,
             }),
         )
+    }
+}
+
+struct BulkDmlJobIngestRequest {}
+struct BulkDmlJobStatusRequest {}
+struct BulkDmlJobSuccessfulRecordsRequest {}
+struct BulkDmlJobFailedRecordsRequest {}
+struct BulkDmlJobUnprocessedRecordsRequest {}
+struct BulkDmlJobSetStatusRequest {}
+struct BulkDmlJobDeleteRequest {}
+struct BulkDmlJobListRequest {}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum BulkApiDmlOperation {
+    Insert,
+    Delete,
+    HardDelete,
+    Update,
+    Upsert
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum BulkApiJobType {
+    BigObjectIngest,
+    Classic,
+    V2Ingest // Need a serde override?
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BulkDmlJob {
+    id: SalesforceId,
+    assignment_rule_id: SalesforceId,
+    column_delimiter: BulkApiColumnDelimiter,
+    content_type: BulkApiContentType,
+    external_id_field_name: String,
+    line_ending: BulkApiLineEnding,
+    object: String,
+    operation: BulkApiDmlOperation
+    api_version: String,
+    concurrency_mode: BulkApiConcurrencyMode,
+    content_url: Url,
+    created_by_id: SalesforceId,
+    created_date: DateTime,
+    job_type: BulkApiJobType,
+    state: BulkJobStatus,
+    system_modstamp: DateTime,
+}
+
+impl BulkDmlJob {
+    async fn complete(&self) -> Result<()> {
+
+    }
+
+    async fn status(&mut self, conn: &Connection) -> Result<()> {
+
+    }
+    
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BulkDmlJobCreateRequest {
+    assignment_rule_id: Option<SalesforceId>,
+    column_delimiter: BulkApiColumnDelimiter,
+    content_type: BulkApiContentType,
+    external_id_field_name: String,
+    line_ending: BulkApiLineEnding,
+    object: String,
+    operation: BulkApiDmlOperation
+}
+
+impl BulkDmlJobCreateRequest {
+    pub fn new_raw() -> Self {
+
+    }
+
+    pub fn new(operation: BulkApiDmlOperation, object: &SObjectType) -> Self {
+        Self { operation, object: object.get_api_name() }
+    }
+}
+
+impl SalesforceRequest for BulkDmlJobCreateRequest {
+    type ReturnValue = BulkDmlJob;
+
+    fn get_method(&self) -> Method {
+        Method::POST
+    }
+
+    fn get_body(&self) -> Option<Value> {
+        Some(serde_json::to_value(&self))
+    }
+
+    fn get_url(&self) -> String {
+        "jobs/ingest".to_owned()
+    }
+}
+
+struct BulkDmlJobIngestRequest {
+
+}
+
+impl BulkDmlJobIngestRequest {
+    pub fn new_raw() -> Self {
+
+    }
+
+    pub fn new<T>(id: SalesforceId, sobject_type: &SObjectType, records: impl Stream<Item = T>) -> Self
+        where T: SObjectSerialization {
+
+    }
+}
+
+impl SalesforceRawRequest for BulkDmlJobIngestRequest {
+    type ReturnValue = ();
+
+    fn get_method(&self) -> Method {
+        Method::PUT
+    }
+
+    fn get_url(&self) -> String {
+        format!("jobs/ingest/{}/batches", self.id)
+    }
+
+    fn get_body(&self) -> Body {
+
+    }
+
+    fn get_result(&self, response: Response) -> Result<Self::ReturnValue> {
+        // HTTP errors are handled by the Connection.
+        Ok(())
     }
 }
