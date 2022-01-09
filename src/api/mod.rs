@@ -15,7 +15,7 @@ use crate::rest::describe::{SObjectDescribe, SObjectDescribeRequest};
 
 use anyhow::{Error, Result};
 use async_trait::async_trait;
-use reqwest::{header, Client, Method, RequestBuilder, Response, StatusCode, Url};
+use reqwest::{header, Body, Client, Method, RequestBuilder, Response, StatusCode, Url};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
@@ -43,7 +43,7 @@ pub trait SalesforceRequest {
 pub(crate) trait SalesforceRawRequest {
     type ReturnValue;
 
-    fn get_body(&self) -> Option<Value> {
+    fn get_body(&self) -> Option<Body> {
         None
     }
 
@@ -244,7 +244,7 @@ impl Connection {
 
         if method == Method::POST || method == Method::PUT || method == Method::PATCH {
             if let Some(body) = request.get_body() {
-                builder = builder.json(&body);
+                builder = builder.body(body);
             }
         }
 

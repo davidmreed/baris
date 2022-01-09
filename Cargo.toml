@@ -19,6 +19,7 @@ serde_urlencoded="0.7.0"
 anyhow="1.0"
 tokio = { version = "1.4.0", features = ["macros", "rt-multi-thread", "time", "sync"] }
 tokio-stream = "0.1"
+tokio-util = { version = "0.6.9", features = ["io"] }
 csv = "1.1"
 chrono = { version = "0.4", features = ["serde"]}
 async-trait = "0.1"
@@ -26,6 +27,7 @@ async-stream = "0.3.2"
 futures = "0.3"
 itertools = "0.10"
 bytes = "1.1.0"
+csv-async = { version = "1.2.4", features = ["with_serde", "tokio"] }
 
 [lib]
 name = "baris"
