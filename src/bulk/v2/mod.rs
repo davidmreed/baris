@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::Stream;
 use reqwest::{Body, Method, Response};
+use serde::Serialize;
 use serde_derive::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -35,6 +36,7 @@ const POLL_INTERVAL: u64 = 10;
 
 #[derive(Serialize, Deserialize, PartialEq)]
 pub enum BulkJobStatus {
+    Open,
     UploadComplete,
     InProgress,
     Aborted,
@@ -44,7 +46,10 @@ pub enum BulkJobStatus {
 
 impl BulkJobStatus {
     pub fn is_completed_state(&self) -> bool {
-        self != &Self::UploadComplete && self != &Self::InProgress
+        match self {
+            Self::UploadComplete | Self::InProgress | Self::Open => false,
+            _ => true,
+        }
     }
 }
 
@@ -464,9 +469,9 @@ where
         ))
     }
 }
-struct BulkDmlJobFailedRecordsRequest {}
-struct BulkDmlJobUnprocessedRecordsRequest {}
-struct BulkDmlJobSetStatusRequest {
+pub struct BulkDmlJobFailedRecordsRequest {}
+pub struct BulkDmlJobUnprocessedRecordsRequest {}
+pub struct BulkDmlJobSetStatusRequest {
     id: SalesforceId,
     status: BulkJobStatus,
 }
@@ -501,9 +506,10 @@ impl SalesforceRequest for BulkDmlJobSetStatusRequest {
     }
 }
 
-struct BulkDmlJobDeleteRequest {
+pub struct BulkDmlJobDeleteRequest {
     id: SalesforceId,
 }
+
 impl BulkDmlJobDeleteRequest {
     pub fn new(id: SalesforceId) -> Self {
         Self { id }
@@ -530,15 +536,15 @@ impl SalesforceRequest for BulkDmlJobDeleteRequest {
 // TODO: implement query stream interface.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BulkDmlJobListResponse {
-    done: bool,
-    records: Vec<BulkDmlJob>,
-    next_records_url: String,
+pub struct BulkDmlJobListResponse {
+    pub done: bool,
+    pub records: Vec<BulkDmlJob>,
+    pub next_records_url: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct BulkDmlJobListRequest {
+pub struct BulkDmlJobListRequest {
     is_pk_chunking_enabled: Option<bool>,
     job_type: Option<BulkApiJobType>,
     query_locator: Option<String>,
@@ -584,7 +590,7 @@ impl SalesforceRequest for BulkDmlJobListRequest {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-enum BulkApiDmlOperation {
+pub enum BulkApiDmlOperation {
     Insert,
     Delete,
     HardDelete,
@@ -593,7 +599,7 @@ enum BulkApiDmlOperation {
 }
 
 #[derive(Serialize, Deserialize)]
-enum BulkApiJobType {
+pub enum BulkApiJobType {
     // serde rename is not required; this are the actual API values
     BigObjectIngest,
     Classic,
@@ -602,30 +608,30 @@ enum BulkApiJobType {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BulkDmlJob {
-    id: SalesforceId,
-    assignment_rule_id: SalesforceId,
-    column_delimiter: BulkApiColumnDelimiter,
-    content_type: BulkApiContentType,
-    external_id_field_name: String,
-    line_ending: BulkApiLineEnding,
-    object: String,
-    operation: BulkApiDmlOperation,
-    api_version: String,
-    concurrency_mode: BulkApiConcurrencyMode,
-    content_url: String,
-    created_by_id: SalesforceId,
-    created_date: DateTime,
-    job_type: BulkApiJobType,
-    state: BulkJobStatus,
-    system_modstamp: DateTime,
+pub struct BulkDmlJob {
+    pub id: SalesforceId,
+    pub assignment_rule_id: Option<SalesforceId>,
+    pub column_delimiter: Option<BulkApiColumnDelimiter>, // TODO: I guess this isn't returned from some calls...?
+    pub content_type: BulkApiContentType,
+    pub external_id_field_name: Option<String>,
+    pub line_ending: Option<BulkApiLineEnding>, // TODO: this one too
+    pub object: String,
+    pub operation: BulkApiDmlOperation,
+    pub api_version: f32,
+    pub concurrency_mode: BulkApiConcurrencyMode,
+    pub content_url: Option<String>, // TODO: this one too
+    pub created_by_id: SalesforceId,
+    pub created_date: DateTime,
+    pub job_type: Option<BulkApiJobType>, // TODO: why is this not returned from Create()
+    pub state: BulkJobStatus,
+    pub system_modstamp: DateTime,
     // These properties appear to only be returned on a Get Job Info, not a Create Job. TODO
-    apex_processing_time: Option<u64>,
-    api_active_processing_time: Option<u64>,
-    number_records_failed: Option<u64>,
-    number_records_processed: Option<u64>,
-    retries: Option<u32>,
-    total_processing_time: Option<u64>,
+    pub apex_processing_time: Option<u64>,
+    pub api_active_processing_time: Option<u64>,
+    pub number_records_failed: Option<u64>,
+    pub number_records_processed: Option<u64>,
+    pub retries: Option<u32>,
+    pub total_processing_time: Option<u64>,
 }
 
 impl BulkDmlJob {
@@ -641,6 +647,29 @@ impl BulkDmlJob {
                 job_type,
                 query_locator,
             ))
+            .await?)
+    }
+
+    async fn create(
+        conn: &Connection,
+        operation: BulkApiDmlOperation,
+        object: String,
+    ) -> Result<BulkDmlJob> {
+        Ok(conn
+            .execute(&BulkDmlJobCreateRequest::new(operation, object))
+            .await?)
+    }
+
+    async fn ingest<T>(
+        &self,
+        conn: &Connection,
+        records: impl Stream<Item = T> + 'static + Send + Sync,
+    ) -> Result<()>
+    where
+        T: SObjectSerialization + Serialize,
+    {
+        Ok(conn
+            .execute_raw_request(&BulkDmlJobIngestRequest::new(self.id, records))
             .await?)
     }
 
@@ -685,7 +714,7 @@ impl BulkDmlJob {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct BulkDmlJobCreateRequest {
+pub struct BulkDmlJobCreateRequest {
     assignment_rule_id: Option<SalesforceId>,
     column_delimiter: BulkApiColumnDelimiter,
     content_type: BulkApiContentType,
@@ -743,37 +772,31 @@ impl SalesforceRequest for BulkDmlJobCreateRequest {
     }
 }
 
-// The end point is that we need to provide a Stream<Item = Bytes> to Reqwest for uploading
-// Ideally, we want to avoid consuming our entire input stream of records (which could be very large)
-// and storing in memory or on disk.
-// So what we want is essentially a stream adapter from Stream<Item = T: SObjectSerialization> to
-// Stream<Item = Bytes>.
-// We'd implement a struct that implements Write and Stream. When polled, it polls the SObject stream,
-// serializes a returned SObject into its Writer (which uses a single, growing, mutable buffer),
-// and then yields a Bytes with the written data.
 // NTH: parameterize how many records it consumes at a time. One at a time is probably not efficient.
 // TODO: figure out how to set "#N/A" for nulls, and make it configurable.
 
 type BytesStream = Pin<Box<dyn Stream<Item = Result<Bytes>> + Send + Sync>>;
 pub fn new_bytes_stream<T>(source: Pin<Box<dyn Stream<Item = T> + Send + Sync>>) -> BytesStream
 where
-    T: SObjectSerialization,
+    T: SObjectSerialization + Serialize,
 {
-    let mut has_headers = true;
-    Box::pin(source.map(move |s| {
-        let buf = BytesMut::new();
-        let mut writer = csv::WriterBuilder::new()
-            .has_headers(has_headers)
-            .from_writer(buf.writer());
-        has_headers = false;
-
-        writer.serialize(s.to_value().unwrap()).unwrap(); // TODO: can panic
-        writer.flush().unwrap(); // TODO
-        Ok(writer.into_inner()?.into_inner().freeze())
-    }))
+    use futures::StreamExt; // TODO: this is not an appealing solution.
+    Box::pin(tokio_stream::StreamExt::map(
+        source.enumerate(),
+        |(i, s)| {
+            let buf = BytesMut::new();
+            let mut writer = csv::WriterBuilder::new()
+                .has_headers(i == 0)
+                .from_writer(buf.writer());
+            writer.serialize(s).unwrap(); // TODO: can panic
+            writer.flush().unwrap(); // TODO
+            let bytes = writer.into_inner()?.into_inner().freeze();
+            Ok(bytes)
+        },
+    ))
 }
 
-struct BulkDmlJobIngestRequest {
+pub struct BulkDmlJobIngestRequest {
     id: SalesforceId,
     body: RwLock<Option<BytesStream>>,
 }
@@ -781,7 +804,7 @@ struct BulkDmlJobIngestRequest {
 impl BulkDmlJobIngestRequest {
     pub fn new<T>(id: SalesforceId, records: impl Stream<Item = T> + 'static + Send + Sync) -> Self
     where
-        T: SObjectSerialization,
+        T: SObjectSerialization + Serialize, // FIXME This bound is undesizable but satisfies `csv`
     {
         Self {
             id,
@@ -806,9 +829,14 @@ impl SalesforceRawRequest for BulkDmlJobIngestRequest {
         // This is not a good implementation. Panics are possible
         // and this results in only one possible call to get_body().
         // TODO: should get_body() consume self?
-        let body = self.body.write().unwrap().take().unwrap();
+        Some(Body::wrap_stream(
+            self.body.write().unwrap().take().unwrap(),
+        ))
+    }
 
-        Some(Body::wrap_stream(body))
+    fn get_mime_type(&self) -> String {
+        // NOTE: The Bulk API 2.0 will throw a 500 if this MIME type is not set.
+        "text/csv".to_owned()
     }
 
     async fn get_result(

@@ -46,6 +46,9 @@ pub(crate) trait SalesforceRawRequest {
     fn get_body(&self) -> Option<Body> {
         None
     }
+    fn get_mime_type(&self) -> String {
+        "text/json".to_owned()
+    }
 
     fn get_url(&self) -> String;
     fn get_method(&self) -> Method;
@@ -247,6 +250,8 @@ impl Connection {
                 builder = builder.body(body);
             }
         }
+
+        builder = builder.header(reqwest::header::CONTENT_TYPE, request.get_mime_type());
 
         if let Some(params) = request.get_query_parameters() {
             builder = builder.query(&params);

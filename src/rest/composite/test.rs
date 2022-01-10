@@ -69,7 +69,7 @@ async fn test_composite_request_create_update_delete() -> Result<()> {
     request.add("delete", &mut delete_account_request)?;
 
     let result = conn.execute(&request).await?;
-    let account_result = result.get_result(&conn, "delete", &delete_account_request)?;
+    let _account_result = result.get_result(&conn, "delete", &delete_account_request)?;
 
     //assert!(account_result.success); TODO
 
@@ -104,7 +104,7 @@ async fn test_composite_request_collections() -> Result<()> {
     request.add("delete", &mut delete_account_request)?;
 
     let result = conn.execute(&request).await?;
-    let account_result = result.get_result(&conn, "delete", &delete_account_request)?;
+    let _account_result = result.get_result(&conn, "delete", &delete_account_request)?;
 
     Ok(())
 }

@@ -5,11 +5,13 @@ Cactusforce
 - Fix the Bulk API tests (?)
 - [Ideal] We should implement sObject Collections DML on collections other than Vecs, as well as iterators.
 - [Ideal] Build prelude
-- [Ideal] Allow Delete streams to accept Item = SalesforceId (will require decomposing the trait )
+- [Ideal] Allow Delete streams to accept Item = SalesforceId (will require decomposing the trait)
 - [Ideal] Build example web client
+- Why are queries &str but object names are String? Be consistent.
 
 MVP
 
+- Macro (?) for retrieving a static struct with all of its fields.
 - Can we remove the SObjectWithId trait entirely, since we're now using early serialization?
 - Implement JWT auth
 - Resolve connection-as-ref or not in parameters.

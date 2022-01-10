@@ -202,9 +202,9 @@ impl SObjectDescribe {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PicklistValueDescribe {
-    active: bool,
-    default_value: bool,
-    label: String,
-    valid_for: Option<String>, // fixme: probably a new type
-    value: String,
+    pub active: bool,
+    pub default_value: bool,
+    pub label: String,
+    pub valid_for: Option<String>, // fixme: probably a new type
+    pub value: String,
 }

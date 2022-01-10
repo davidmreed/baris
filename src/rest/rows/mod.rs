@@ -337,15 +337,7 @@ where
         if let Some(fields) = &self.fields {
             let mut hm = Map::new();
 
-            hm.insert(
-                "fields".to_string(),
-                Value::Array(
-                    fields
-                        .iter()
-                        .map(|f| Value::String(f.to_string()))
-                        .collect(),
-                ),
-            );
+            hm.insert("fields".to_string(), Value::String(fields.join(",")));
 
             Some(Value::Object(hm))
         } else {
