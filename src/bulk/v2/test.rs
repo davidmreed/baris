@@ -77,7 +77,7 @@ async fn test_bulk_query_to_update() -> Result<()> {
 
     account.create(&conn).await?;
 
-    Account::bulk_query(&conn, "SELECT Id, Name FROM Account LIMIT 1", false)
+    Account::bulk_query(&conn, "SELECT Id, Name FROM Account", false)
         .await?
         .map(|r| {
             let mut r = r.unwrap();

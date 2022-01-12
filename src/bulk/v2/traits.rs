@@ -8,7 +8,7 @@ use crate::data::{
 };
 use crate::{streams::ResultStream, Connection, SObjectType};
 
-use super::{BulkApiDmlOperation, BulkDmlJob, BulkQueryJob};
+use super::{BulkApiDmlOperation, BulkDmlJob, BulkDmlJobCreateRequest, BulkQueryJob};
 
 #[async_trait]
 pub trait BulkQueryable: DynamicallyTypedSObject + SObjectDeserialization + Unpin {
@@ -54,6 +54,57 @@ pub trait SingleTypeBulkQueryable: SingleTypedSObject + SObjectDeserialization +
 impl<T> SingleTypeBulkQueryable for T where T: SingleTypedSObject + SObjectDeserialization + Unpin {}
 
 #[async_trait]
+pub trait BulkInsertable {
+    async fn bulk_insert(self, conn: &Connection, object: String) -> Result<BulkDmlJob>;
+}
+
+#[async_trait]
+impl<K, T> BulkInsertable for K
+where
+    K: Stream<Item = T> + Send + Sync + 'static,
+    T: SObjectSerialization + Unpin + Serialize, // FIXME: undesirable but supports CSV
+{
+    async fn bulk_insert(self, conn: &Connection, object: String) -> Result<BulkDmlJob> {
+        let conn = conn.clone();
+        let job = BulkDmlJob::create(&conn, BulkApiDmlOperation::Insert, object).await?;
+        job.ingest(&conn, self).await?;
+        job.close(&conn).await?;
+
+        let job = job.complete(&conn).await?;
+
+        Ok(job)
+    }
+}
+
+#[async_trait]
+pub trait SingleTypeBulkInsertable {
+    async fn bulk_insert(self, conn: &Connection) -> Result<BulkDmlJob>;
+}
+
+#[async_trait]
+impl<K, T> SingleTypeBulkInsertable for K
+where
+    K: Stream<Item = T> + Send + Sync + 'static,
+    T: SObjectSerialization + SingleTypedSObject + Unpin + Serialize,
+{
+    async fn bulk_insert(self, conn: &Connection) -> Result<BulkDmlJob> {
+        let conn = conn.clone();
+        let job = BulkDmlJob::create(
+            &conn,
+            BulkApiDmlOperation::Insert,
+            T::get_type_api_name().to_owned(),
+        )
+        .await?;
+        job.ingest(&conn, self).await?;
+        job.close(&conn).await?;
+
+        let job = job.complete(&conn).await?;
+
+        Ok(job)
+    }
+}
+
+#[async_trait]
 pub trait BulkUpdateable {
     async fn bulk_update(self, conn: &Connection, object: String) -> Result<BulkDmlJob>;
 }
@@ -95,6 +146,150 @@ where
             T::get_type_api_name().to_owned(),
         )
         .await?;
+        job.ingest(&conn, self).await?;
+        job.close(&conn).await?;
+
+        let job = job.complete(&conn).await?;
+
+        Ok(job)
+    }
+}
+
+#[async_trait]
+pub trait BulkDeletable {
+    async fn bulk_delete(
+        self,
+        conn: &Connection,
+        object: String,
+        hard_delete: bool,
+    ) -> Result<BulkDmlJob>;
+}
+
+#[async_trait]
+impl<K, T> BulkDeletable for K
+where
+    K: Stream<Item = T> + Send + Sync + 'static,
+    T: SObjectSerialization + Unpin + Serialize, // FIXME: undesirable but supports CSV
+{
+    async fn bulk_delete(
+        self,
+        conn: &Connection,
+        object: String,
+        hard_delete: bool,
+    ) -> Result<BulkDmlJob> {
+        let conn = conn.clone();
+        let job = BulkDmlJob::create(
+            &conn,
+            if hard_delete {
+                BulkApiDmlOperation::HardDelete
+            } else {
+                BulkApiDmlOperation::Delete
+            },
+            object,
+        )
+        .await?;
+        job.ingest(&conn, self).await?;
+        job.close(&conn).await?;
+
+        let job = job.complete(&conn).await?;
+
+        Ok(job)
+    }
+}
+
+#[async_trait]
+pub trait SingleTypeBulkDeletable {
+    async fn bulk_delete(self, conn: &Connection, hard_delete: bool) -> Result<BulkDmlJob>;
+}
+
+#[async_trait]
+impl<K, T> SingleTypeBulkDeletable for K
+where
+    K: Stream<Item = T> + Send + Sync + 'static,
+    T: SObjectSerialization + SingleTypedSObject + Unpin + Serialize,
+{
+    async fn bulk_delete(self, conn: &Connection, hard_delete: bool) -> Result<BulkDmlJob> {
+        let conn = conn.clone();
+        let job = BulkDmlJob::create(
+            &conn,
+            if hard_delete {
+                BulkApiDmlOperation::HardDelete
+            } else {
+                BulkApiDmlOperation::Delete
+            },
+            T::get_type_api_name().to_owned(),
+        )
+        .await?;
+        job.ingest(&conn, self).await?;
+        job.close(&conn).await?;
+
+        let job = job.complete(&conn).await?;
+
+        Ok(job)
+    }
+}
+
+#[async_trait]
+pub trait BulkUpsertable {
+    async fn bulk_upsert(
+        self,
+        conn: &Connection,
+        object: String,
+        external_id: String,
+    ) -> Result<BulkDmlJob>;
+}
+
+#[async_trait]
+impl<K, T> BulkUpsertable for K
+where
+    K: Stream<Item = T> + Send + Sync + 'static,
+    T: SObjectSerialization + Unpin + Serialize,
+{
+    async fn bulk_upsert(
+        self,
+        conn: &Connection,
+        object: String,
+        external_id: String,
+    ) -> Result<BulkDmlJob> {
+        let conn = conn.clone();
+        let job = conn
+            .execute(&BulkDmlJobCreateRequest::new_with_options(
+                BulkApiDmlOperation::Upsert,
+                object,
+                Some(external_id),
+                None,
+            ))
+            .await?;
+        job.ingest(&conn, self).await?;
+        job.close(&conn).await?;
+
+        let job = job.complete(&conn).await?;
+
+        Ok(job)
+    }
+}
+
+#[async_trait]
+pub trait SingleTypeBulkUpsertable {
+    async fn bulk_upsert(self, conn: &Connection, external_id: String) -> Result<BulkDmlJob>;
+}
+
+#[async_trait]
+impl<K, T> SingleTypeBulkUpsertable for K
+where
+    K: Stream<Item = T> + Send + Sync + 'static,
+    T: SObjectSerialization + SingleTypedSObject + Unpin + Serialize,
+{
+    async fn bulk_upsert(self, conn: &Connection, external_id: String) -> Result<BulkDmlJob> {
+        let conn = conn.clone();
+        let job = conn
+            .execute(&BulkDmlJobCreateRequest::new_with_options(
+                BulkApiDmlOperation::Upsert,
+                T::get_type_api_name().to_owned(),
+                Some(external_id),
+                None,
+            ))
+            .await?;
         job.ingest(&conn, self).await?;
         job.close(&conn).await?;
 
