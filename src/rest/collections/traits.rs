@@ -1,4 +1,4 @@
-use crate::{data::SObjectRepresentation, Connection, FieldValue};
+use crate::{api::Connection, data::FieldValue, data::SObjectRepresentation};
 
 use anyhow::Result;
 use async_trait::async_trait;

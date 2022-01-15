@@ -3,9 +3,10 @@ use async_trait::async_trait;
 use tokio_stream::StreamExt;
 
 use crate::{
+    api::Connection,
+    data::SObjectType,
     data::{DynamicallyTypedSObject, SObjectDeserialization, SingleTypedSObject},
     streams::ResultStream,
-    Connection, SObjectType,
 };
 
 use super::{AggregateResult, QueryRequest};

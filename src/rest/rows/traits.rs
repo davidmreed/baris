@@ -1,7 +1,7 @@
 use crate::data::{
     DynamicallyTypedSObject, SObjectDeserialization, SObjectRepresentation, SingleTypedSObject,
 };
-use crate::{Connection, FieldValue, SObjectType, SalesforceId};
+use crate::{api::Connection, data::FieldValue, data::SObjectType, data::SalesforceId};
 use anyhow::Result;
 use async_trait::async_trait;
 
@@ -11,14 +11,26 @@ use super::{
 };
 
 #[async_trait]
-pub trait SObjectDML {
+pub trait SObjectRowCreateable {
     fn create_request(&self) -> Result<SObjectCreateRequest>;
-    fn delete_request(&self) -> Result<SObjectDeleteRequest>;
-    fn update_request(&self) -> Result<SObjectUpdateRequest>;
-    fn upsert_request(&self, external_id: &str) -> Result<SObjectUpsertRequest>;
     async fn create(&mut self, conn: &Connection) -> Result<()>;
+}
+
+#[async_trait]
+pub trait SObjectRowUpdateable {
+    fn update_request(&self) -> Result<SObjectUpdateRequest>;
     async fn update(&mut self, conn: &Connection) -> Result<()>;
+}
+
+#[async_trait]
+pub trait SObjectRowUpsertable {
+    fn upsert_request(&self, external_id: &str) -> Result<SObjectUpsertRequest>;
     async fn upsert(&mut self, conn: &Connection, external_id: &str) -> Result<()>;
+}
+
+#[async_trait]
+pub trait SObjectRowDeletable {
+    fn delete_request(&self) -> Result<SObjectDeleteRequest>;
     async fn delete(&mut self, conn: &Connection) -> Result<()>;
 }
 

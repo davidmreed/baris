@@ -1,10 +1,9 @@
 use anyhow::Result;
 
-use crate::data::traits::*;
-use crate::rest::query::traits::*;
-use crate::rest::rows::traits::*;
+use crate::prelude::*;
+
+use crate::data::{FieldValue, SObject};
 use crate::test_integration_base::{get_test_connection, Account};
-use crate::{FieldValue, SObject};
 
 #[tokio::test]
 #[ignore]

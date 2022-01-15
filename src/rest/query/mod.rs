@@ -7,10 +7,12 @@ use serde_json::{Map, Value};
 use tokio::{spawn, task::JoinHandle};
 
 use crate::{
+    api::Connection,
     api::SalesforceRequest,
     data::SObjectDeserialization,
+    data::SObjectType,
+    errors::SalesforceError,
     streams::{ResultStream, ResultStreamManager, ResultStreamState},
-    Connection, SObjectType, SalesforceError,
 };
 
 pub mod traits;

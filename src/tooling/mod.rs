@@ -5,7 +5,7 @@ use reqwest::Method;
 use serde_derive::Deserialize;
 use serde_json::json;
 
-use crate::{api::SalesforceRequest, Connection, SalesforceError};
+use crate::{api::Connection, api::SalesforceRequest, errors::SalesforceError};
 
 #[cfg(test)]
 mod test;
@@ -48,7 +48,9 @@ impl Display for ExecuteAnonymousApexResponse {
         } else if !self.compiled {
             write!(
                 f,
-                "Anonymous Apex failed to compile: {}",
+                "Anonymous Apex failed to compile at {}, {}: {}",
+                self.line,
+                self.column,
                 self.compile_problem.as_ref().unwrap_or(&"".to_owned()),
             )?;
         }
@@ -82,7 +84,7 @@ impl SalesforceRequest for ExecuteAnonymousApexRequest {
 
     fn get_result(
         &self,
-        _conn: &crate::Connection,
+        _conn: &Connection,
         body: Option<&serde_json::Value>,
     ) -> anyhow::Result<Self::ReturnValue> {
         if let Some(body) = body {

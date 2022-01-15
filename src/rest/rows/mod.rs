@@ -13,13 +13,13 @@ use serde_json::Value;
 use crate::api::CompositeFriendlyRequest;
 use crate::api::SalesforceRawRequest;
 use crate::api::SalesforceRequest;
+use crate::data::FieldValue;
 use crate::data::SObjectDeserialization;
 use crate::data::SObjectRepresentation;
 use crate::data::SObjectSerialization;
 use crate::data::SObjectWithId;
 use crate::data::TypedSObject;
-use crate::FieldValue;
-use crate::{Connection, SObjectType, SalesforceError, SalesforceId};
+use crate::{api::Connection, data::SObjectType, data::SalesforceId, errors::SalesforceError};
 
 use super::DmlError;
 use super::DmlResult;

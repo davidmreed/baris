@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::data::{
     DynamicallyTypedSObject, SObjectDeserialization, SObjectSerialization, SingleTypedSObject,
 };
-use crate::{streams::ResultStream, Connection, SObjectType};
+use crate::{api::Connection, data::SObjectType, streams::ResultStream};
 
 use super::{BulkApiDmlOperation, BulkDmlJob, BulkDmlJobCreateRequest, BulkQueryJob};
 

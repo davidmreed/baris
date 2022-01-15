@@ -10,7 +10,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use crate::{FieldValue, SalesforceError};
+use crate::{data::FieldValue, errors::SalesforceError};
 
 use super::sobjects::SObjectType;
 use super::types::SalesforceId;

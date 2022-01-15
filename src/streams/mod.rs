@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 use tokio::task::JoinHandle;
 use tokio_stream::Stream;
 
-use crate::{data::SObjectDeserialization, FieldValue, SObjectType};
+use crate::{data::FieldValue, data::SObjectDeserialization, data::SObjectType};
 
 #[cfg(test)]
 mod test;

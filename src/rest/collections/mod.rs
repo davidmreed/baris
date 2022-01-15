@@ -1,12 +1,15 @@
 use std::{marker::PhantomData, pin::Pin};
 
 use crate::{
+    api::Connection,
     api::{CompositeFriendlyRequest, SalesforceRequest},
+    data::SObjectType,
+    data::SalesforceId,
     data::{
         SObjectDeserialization, SObjectRepresentation, SObjectSerialization, SObjectWithId,
         TypedSObject,
     },
-    Connection, SObjectType, SalesforceError, SalesforceId,
+    errors::SalesforceError,
 };
 
 use anyhow::Result;

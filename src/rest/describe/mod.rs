@@ -5,7 +5,10 @@ use reqwest::Method;
 use serde_derive::Deserialize;
 use serde_json::Value;
 
-use crate::{api::SalesforceRequest, data::SoapType, Connection, SalesforceError, SalesforceId};
+use crate::{
+    api::Connection, api::SalesforceRequest, data::SalesforceId, data::SoapType,
+    errors::SalesforceError,
+};
 
 #[cfg(test)]
 mod test;

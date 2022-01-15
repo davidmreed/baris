@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use reqwest::{Client, Url};
 use serde_derive::Deserialize;
 
-use crate::SalesforceError;
+use crate::errors::SalesforceError;
 
 #[cfg(test)]
 mod test;

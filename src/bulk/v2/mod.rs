@@ -18,16 +18,19 @@ use tokio::task::{spawn, JoinHandle};
 use tokio::time::sleep;
 use tokio_util::io::StreamReader;
 
-use crate::api::{SalesforceRawRequest, SalesforceRequest};
-use crate::data::{SObjectDeserialization, SObjectSerialization};
-use crate::streams::value_from_csv;
 use crate::{
+    api::Connection,
+    api::{SalesforceRawRequest, SalesforceRequest},
     data::DateTime,
+    data::SObjectType,
+    data::SalesforceId,
+    data::{SObjectDeserialization, SObjectSerialization},
+    errors::SalesforceError,
+    streams::value_from_csv,
     streams::{ResultStream, ResultStreamManager, ResultStreamState},
-    Connection, SObjectType, SalesforceError, SalesforceId,
 };
 
-mod traits;
+pub mod traits;
 
 #[cfg(test)]
 mod test;
