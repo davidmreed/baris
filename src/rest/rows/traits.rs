@@ -66,24 +66,9 @@ pub trait SObjectSingleTypedRetrieval: Sized + SObjectDeserialization {
 }
 
 #[async_trait]
-impl<T> SObjectDML for T
-where
-    T: SObjectRepresentation,
-{
+impl<T> SObjectRowCreateable for T where T: SObjectSerialization {
     fn create_request(&self) -> Result<SObjectCreateRequest> {
         Ok(SObjectCreateRequest::new(self)?)
-    }
-
-    fn delete_request(&self) -> Result<SObjectDeleteRequest> {
-        Ok(SObjectDeleteRequest::new(self)?)
-    }
-
-    fn update_request(&self) -> Result<SObjectUpdateRequest> {
-        Ok(SObjectUpdateRequest::new(self)?)
-    }
-
-    fn upsert_request(&self, external_id: &str) -> Result<SObjectUpsertRequest> {
-        Ok(SObjectUpsertRequest::new(self, external_id)?)
     }
 
     async fn create(&mut self, conn: &Connection) -> Result<()> {
@@ -94,9 +79,23 @@ where
         }
         result.into()
     }
+}
 
+#[async_trait]
+impl<T> SObjectRowUpdateable for T where T: SObjectSerialization {
+    fn update_request(&self) -> Result<SObjectUpdateRequest> {
+        Ok(SObjectUpdateRequest::new(self)?)
+    }
+    
     async fn update(&mut self, conn: &Connection) -> Result<()> {
         conn.execute(&self.update_request()?).await
+    }
+}
+
+#[async_trait]
+impl<T> SObjectRowUpsertable for T where T: SObjectSerialization {
+    fn upsert_request(&self, external_id: &str) -> Result<SObjectUpsertRequest> {
+        Ok(SObjectUpsertRequest::new(self, external_id)?)
     }
 
     async fn upsert(&mut self, conn: &Connection, external_id: &str) -> Result<()> {
@@ -111,6 +110,13 @@ where
         }
 
         result.into()
+    }
+}
+
+#[async_trait]
+impl<T> SObjectRowDeletable for T where T: SObjectSerialization {
+    fn delete_request(&self) -> Result<SObjectDeleteRequest> {
+        Ok(SObjectDeleteRequest::new(self)?)
     }
 
     async fn delete(&mut self, conn: &Connection) -> Result<()> {

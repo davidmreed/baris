@@ -19,7 +19,7 @@ use super::types::SalesforceId;
 /// (`SObjectSerialization`), consumed from an API (`SObjectDeserialization`),
 /// has an Id, and can provide its own type.
 ///
-/// This trait has a blanket implementation for any struct that satisfies its substraits.
+/// This trait has a blanket implementation for any struct that satisfies its subtraits.
 pub trait SObjectRepresentation:
     SObjectDeserialization + SObjectSerialization + SObjectWithId + TypedSObject
 {
@@ -41,7 +41,7 @@ pub trait TypedSObject {
 /// and upserts. The FieldValue for the Id may hold a `SalesforceId`,
 /// a `Null`, or a `CompositeReference`. Other enum values may result
 /// in a panic.
-pub trait SObjectWithId {
+pub trait SObjectWithId: SObjectBase {
     fn get_id(&self) -> FieldValue;
     fn set_id(&mut self, id: FieldValue);
 
@@ -87,7 +87,7 @@ pub trait DynamicallyTypedSObject: TypedSObject {}
 ///
 /// Implement this trait if you need to provide
 /// dynamic deserialization based on the SObject type.
-pub trait SObjectDeserialization: Sized + Send + Sync + 'static {
+pub trait SObjectDeserialization: SObjectBase {
     fn from_value(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<Self>;
 }
 
@@ -98,7 +98,7 @@ pub trait SObjectDeserialization: Sized + Send + Sync + 'static {
 /// Implement this trait if you need to provide
 /// dynamic serialization behavior or if your struct does not directly
 /// map to API-compatible SObject representations.
-pub trait SObjectSerialization: Sized + Send + Sync + 'static {
+pub trait SObjectSerialization: SObjectBase {
     fn to_value(&self) -> Result<Value>;
     fn to_value_with_options(&self, include_type: bool, include_id: bool) -> Result<Value>;
 }
@@ -106,7 +106,7 @@ pub trait SObjectSerialization: Sized + Send + Sync + 'static {
 // TODO: How can we scope down this blanket impl?
 impl<'a, T> SObjectDeserialization for T
 where
-    T: for<'de> serde::Deserialize<'de> + Sized + Send + Sync + 'static,
+    T: for<'de> serde::Deserialize<'de> + SObjectBase,
 {
     fn from_value(value: &serde_json::Value, _sobjecttype: &SObjectType) -> Result<Self> {
         Ok(serde_json::from_value::<Self>(value.clone())?) // TODO: make this not clone.
@@ -115,7 +115,7 @@ where
 
 impl<T> SObjectSerialization for T
 where
-    T: serde::Serialize + SObjectWithId + TypedSObject + Sized + Send + Sync + 'static,
+    T: serde::Serialize + SObjectWithId + TypedSObject + SObjectBase,
 {
     fn to_value(&self) -> Result<Value> {
         Ok(serde_json::to_value(self)?)
@@ -158,3 +158,5 @@ where
         }
     }
 }
+
+pub trait SObjectBase : Sized + Send + Sync + Unpin + 'static;
