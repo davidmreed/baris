@@ -21,10 +21,10 @@ use tokio_util::io::StreamReader;
 use crate::{
     api::Connection,
     api::{SalesforceRawRequest, SalesforceRequest},
+    data::traits::{SObjectDeserialization, SObjectSerialization},
     data::DateTime,
     data::SObjectType,
     data::SalesforceId,
-    data::traits::{SObjectDeserialization, SObjectSerialization},
     errors::SalesforceError,
     streams::value_from_csv,
     streams::{ResultStream, ResultStreamManager, ResultStreamState},

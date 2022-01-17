@@ -158,4 +158,4 @@ where
     }
 }
 
-pub trait SObjectBase : Sized + Send + Sync + Unpin + 'static {}
+pub trait SObjectBase: Sized + Send + Sync + Unpin + 'static {}

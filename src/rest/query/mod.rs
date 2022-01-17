@@ -9,7 +9,7 @@ use tokio::{spawn, task::JoinHandle};
 use crate::{
     api::Connection,
     api::SalesforceRequest,
-    data::traits::{SObjectDeserialization, SObjectBase},
+    data::traits::{SObjectBase, SObjectDeserialization},
     data::SObjectType,
     errors::SalesforceError,
     streams::{ResultStream, ResultStreamManager, ResultStreamState},

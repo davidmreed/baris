@@ -1,4 +1,9 @@
-use crate::{api::Connection, data::FieldValue, data::traits::{SObjectSerialization, SObjectWithId, TypedSObject}, rest::SalesforceId};
+use crate::{
+    api::Connection,
+    data::traits::{SObjectSerialization, SObjectWithId, TypedSObject},
+    data::FieldValue,
+    rest::SalesforceId,
+};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -22,7 +27,11 @@ pub trait SObjectCollectionUpdateable {
 
 #[async_trait]
 pub trait SObjectCollectionUpsertable {
-    fn upsert_request(&self, external_id: String, all_or_none: bool) -> Result<SObjectCollectionUpsertRequest>;
+    fn upsert_request(
+        &self,
+        external_id: String,
+        all_or_none: bool,
+    ) -> Result<SObjectCollectionUpsertRequest>;
     async fn upsert(
         &mut self,
         conn: &Connection,
@@ -37,12 +46,11 @@ pub trait SObjectCollectionDeleteable {
     async fn delete(&mut self, conn: &Connection, all_or_none: bool) -> Result<Vec<Result<()>>>;
 }
 
-
 // TODO: Can we implement for &mut [T] and take advantage of Vec's DerefMut?
 #[async_trait]
 impl<T> SObjectCollectionCreateable for Vec<T>
 where
-    T: SObjectSerialization + SObjectWithId
+    T: SObjectSerialization + SObjectWithId,
 {
     fn create_request(&self, all_or_none: bool) -> Result<SObjectCollectionCreateRequest> {
         SObjectCollectionCreateRequest::new(self, all_or_none)
@@ -68,7 +76,10 @@ where
 }
 
 #[async_trait]
-impl<T> SObjectCollectionUpdateable for Vec<T> where T: SObjectSerialization + SObjectWithId {
+impl<T> SObjectCollectionUpdateable for Vec<T>
+where
+    T: SObjectSerialization + SObjectWithId,
+{
     fn update_request(&self, all_or_none: bool) -> Result<SObjectCollectionUpdateRequest> {
         SObjectCollectionUpdateRequest::new(self, all_or_none)
     }
@@ -84,8 +95,15 @@ impl<T> SObjectCollectionUpdateable for Vec<T> where T: SObjectSerialization + S
 }
 
 #[async_trait]
-impl<T> SObjectCollectionUpsertable for Vec<T> where T: SObjectSerialization + SObjectWithId + TypedSObject {
-    fn upsert_request(&self, external_id: String, all_or_none: bool) -> Result<SObjectCollectionUpsertRequest> {
+impl<T> SObjectCollectionUpsertable for Vec<T>
+where
+    T: SObjectSerialization + SObjectWithId + TypedSObject,
+{
+    fn upsert_request(
+        &self,
+        external_id: String,
+        all_or_none: bool,
+    ) -> Result<SObjectCollectionUpsertRequest> {
         SObjectCollectionUpsertRequest::new(self, &external_id, all_or_none)
     }
 
@@ -116,7 +134,10 @@ impl<T> SObjectCollectionUpsertable for Vec<T> where T: SObjectSerialization + S
 }
 
 #[async_trait]
-impl<T> SObjectCollectionDeleteable for Vec<T> where T: SObjectSerialization + SObjectWithId {
+impl<T> SObjectCollectionDeleteable for Vec<T>
+where
+    T: SObjectSerialization + SObjectWithId,
+{
     fn delete_request(&self, all_or_none: bool) -> Result<SObjectCollectionDeleteRequest> {
         SObjectCollectionDeleteRequest::new(self, all_or_none)
     }
@@ -138,11 +159,13 @@ impl<T> SObjectCollectionDeleteable for Vec<T> where T: SObjectSerialization + S
     }
 }
 
-
 #[async_trait]
-impl SObjectCollectionDeleteable for Vec<SalesforceId>  {
+impl SObjectCollectionDeleteable for Vec<SalesforceId> {
     fn delete_request(&self, all_or_none: bool) -> Result<SObjectCollectionDeleteRequest> {
-        Ok(SObjectCollectionDeleteRequest::new_raw(self.iter().map(|i| i.to_string()).collect(), all_or_none))
+        Ok(SObjectCollectionDeleteRequest::new_raw(
+            self.iter().map(|i| i.to_string()).collect(),
+            all_or_none,
+        ))
     }
 
     async fn delete(&mut self, conn: &Connection, all_or_none: bool) -> Result<Vec<Result<()>>> {
@@ -150,9 +173,7 @@ impl SObjectCollectionDeleteable for Vec<SalesforceId>  {
             .execute(&self.delete_request(all_or_none)?)
             .await?
             .into_iter()
-            .map(|r| {
-                r.into()
-            })
+            .map(|r| r.into())
             .collect())
     }
 }

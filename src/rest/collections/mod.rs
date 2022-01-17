@@ -3,12 +3,12 @@ use std::{marker::PhantomData, pin::Pin};
 use crate::{
     api::Connection,
     api::{CompositeFriendlyRequest, SalesforceRequest},
-    data::SObjectType,
-    data::SalesforceId,
     data::traits::{
         SObjectDeserialization, SObjectRepresentation, SObjectSerialization, SObjectWithId,
         TypedSObject,
     },
+    data::SObjectType,
+    data::SalesforceId,
     errors::SalesforceError,
 };
 
@@ -386,11 +386,7 @@ impl SalesforceRequest for SObjectCollectionCreateRequest {
         Method::POST
     }
 
-    fn get_result(
-        &self,
-        _conn: &Connection,
-        body: Option<&Value>,
-    ) -> Result<Self::ReturnValue> {
+    fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
         if let Some(body) = body {
             Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
         } else {
@@ -528,11 +524,7 @@ impl SalesforceRequest for SObjectCollectionUpdateRequest {
         Method::PATCH
     }
 
-    fn get_result(
-        &self,
-        _conn: &Connection,
-        body: Option<&Value>,
-    ) -> Result<Self::ReturnValue> {
+    fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
         if let Some(body) = body {
             Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
         } else {
