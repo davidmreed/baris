@@ -35,7 +35,7 @@ impl<T> BulkQueryable for T where T: DynamicallyTypedSObject + SObjectDeserializ
 
 #[async_trait]
 pub trait SingleTypeBulkQueryable: SingleTypedSObject + SObjectDeserialization + Unpin {
-    async fn bulk_query(conn: &Connection, query: &str, all: bool) -> Result<ResultStream<Self>> {
+    async fn bulk_query_t(conn: &Connection, query: &str, all: bool) -> Result<ResultStream<Self>> {
         let job = BulkQueryJob::create(
             &conn.clone(), // TODO: correct?
             query,
@@ -78,7 +78,7 @@ where
 
 #[async_trait]
 pub trait SingleTypeBulkInsertable {
-    async fn bulk_insert(self, conn: &Connection) -> Result<BulkDmlJob>;
+    async fn bulk_insert_t(self, conn: &Connection) -> Result<BulkDmlJob>;
 }
 
 #[async_trait]
@@ -87,7 +87,7 @@ where
     K: Stream<Item = T> + Send + Sync + 'static,
     T: SObjectSerialization + SingleTypedSObject + Unpin + Serialize,
 {
-    async fn bulk_insert(self, conn: &Connection) -> Result<BulkDmlJob> {
+    async fn bulk_insert_t(self, conn: &Connection) -> Result<BulkDmlJob> {
         let conn = conn.clone();
         let job = BulkDmlJob::create(
             &conn,
@@ -129,7 +129,7 @@ where
 
 #[async_trait]
 pub trait SingleTypeBulkUpdateable {
-    async fn bulk_update(self, conn: &Connection) -> Result<BulkDmlJob>;
+    async fn bulk_update_t(self, conn: &Connection) -> Result<BulkDmlJob>;
 }
 
 #[async_trait]
@@ -138,7 +138,7 @@ where
     K: Stream<Item = T> + Send + Sync + 'static,
     T: SObjectSerialization + SingleTypedSObject + Unpin + Serialize,
 {
-    async fn bulk_update(self, conn: &Connection) -> Result<BulkDmlJob> {
+    async fn bulk_update_t(self, conn: &Connection) -> Result<BulkDmlJob> {
         let conn = conn.clone();
         let job = BulkDmlJob::create(
             &conn,
@@ -199,7 +199,7 @@ where
 
 #[async_trait]
 pub trait SingleTypeBulkDeletable {
-    async fn bulk_delete(self, conn: &Connection, hard_delete: bool) -> Result<BulkDmlJob>;
+    async fn bulk_delete_t(self, conn: &Connection, hard_delete: bool) -> Result<BulkDmlJob>;
 }
 
 #[async_trait]
@@ -208,7 +208,7 @@ where
     K: Stream<Item = T> + Send + Sync + 'static,
     T: SObjectSerialization + SingleTypedSObject + Unpin + Serialize,
 {
-    async fn bulk_delete(self, conn: &Connection, hard_delete: bool) -> Result<BulkDmlJob> {
+    async fn bulk_delete_t(self, conn: &Connection, hard_delete: bool) -> Result<BulkDmlJob> {
         let conn = conn.clone();
         let job = BulkDmlJob::create(
             &conn,
@@ -271,7 +271,7 @@ where
 
 #[async_trait]
 pub trait SingleTypeBulkUpsertable {
-    async fn bulk_upsert(self, conn: &Connection, external_id: String) -> Result<BulkDmlJob>;
+    async fn bulk_upsert_t(self, conn: &Connection, external_id: String) -> Result<BulkDmlJob>;
 }
 
 #[async_trait]
@@ -280,7 +280,7 @@ where
     K: Stream<Item = T> + Send + Sync + 'static,
     T: SObjectSerialization + SingleTypedSObject + Unpin + Serialize,
 {
-    async fn bulk_upsert(self, conn: &Connection, external_id: String) -> Result<BulkDmlJob> {
+    async fn bulk_upsert_t(self, conn: &Connection, external_id: String) -> Result<BulkDmlJob> {
         let conn = conn.clone();
         let job = conn
             .execute(&BulkDmlJobCreateRequest::new_with_options(

@@ -1,8 +1,6 @@
 use anyhow::Result;
 
 use crate::prelude::*;
-
-use crate::data::{FieldValue, SObject};
 use crate::test_integration_base::{get_test_connection, Account};
 
 #[tokio::test]

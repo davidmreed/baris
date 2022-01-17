@@ -3,9 +3,9 @@ use reqwest::Url;
 use serde_derive::{Deserialize, Serialize};
 use std::env;
 
-use crate::data::{SObjectWithId, SingleTypedSObject};
-use crate::{auth::AccessTokenAuth, Connection};
-use crate::{FieldValue, SalesforceId};
+use crate::data::{SObjectWithId, SingleTypedSObject, SObjectBase};
+use crate::{auth::AccessTokenAuth, api::Connection};
+use crate::data::{FieldValue, SalesforceId};
 
 pub fn get_test_connection() -> Result<Connection> {
     let access_token = env::var("SESSION_ID")?;
@@ -26,6 +26,8 @@ pub struct Account {
     pub id: Option<SalesforceId>,
     pub name: String,
 }
+
+impl SObjectBase for Account {}
 
 impl SObjectWithId for Account {
     fn get_id(&self) -> FieldValue {

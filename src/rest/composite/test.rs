@@ -1,11 +1,9 @@
 use anyhow::Result;
 
-use crate::rest::collections::SObjectCollectionCreateRequest;
-use crate::rest::rows::traits::{SObjectDML, SObjectDynamicallyTypedRetrieval};
-use crate::rest::rows::{SObjectCreateRequest, SObjectDeleteRequest, SObjectUpdateRequest};
+use crate::prelude::*;
 use crate::test_integration_base::get_test_connection;
-use crate::SObject;
-
+use crate::rest::rows::{SObjectCreateRequest, SObjectUpdateRequest, SObjectDeleteRequest};
+use crate::rest::collections::{SObjectCollectionCreateRequest};
 use super::CompositeRequest;
 
 #[tokio::test]

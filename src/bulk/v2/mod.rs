@@ -811,7 +811,7 @@ pub struct BulkDmlJobIngestRequest {
 impl BulkDmlJobIngestRequest {
     pub fn new<T>(id: SalesforceId, records: impl Stream<Item = T> + 'static + Send + Sync) -> Self
     where
-        T: SObjectSerialization + Serialize, // FIXME This bound is undesizable but satisfies `csv`
+        T: SObjectSerialization + Serialize, // FIXME This bound is undesirable but satisfies `csv`
     {
         Self {
             id,

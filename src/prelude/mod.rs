@@ -13,11 +13,13 @@ pub use crate::bulk::v2::traits::{
 pub use crate::data::sobjects::{FieldValue, SObject, SObjectType};
 pub use crate::data::traits::{
     DynamicallyTypedSObject, SObjectDeserialization, SObjectRepresentation, SObjectSerialization,
-    SingleTypedSObject, TypedSObject,
+    SingleTypedSObject, TypedSObject, SObjectBase, SObjectWithId
 };
 
 // REST
 pub use crate::rest::collections::SObjectStream;
+pub use crate::rest::collections::traits::{SObjectCollectionCreateable, SObjectCollectionUpdateable, SObjectCollectionUpsertable, SObjectCollectionDeleteable};
+pub use crate::rest::rows::traits::{SObjectRowCreateable, SObjectRowUpdateable, SObjectRowUpsertable, SObjectRowDeletable, SObjectSingleTypedRetrieval, SObjectDynamicallyTypedRetrieval};
 pub use crate::rest::composite::CompositeRequest;
 pub use crate::rest::query::traits::{Queryable, QueryableSingleType};
 pub use crate::rest::query::AggregateResult;

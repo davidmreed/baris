@@ -1,9 +1,6 @@
 use crate::{
-    bulk::v2::traits::{BulkQueryable, SingleTypeBulkQueryable, SingleTypeBulkUpdateable},
-    data::SObjectWithId,
-    rest::rows::traits::{SObjectDML, SObjectSingleTypedRetrieval},
     test_integration_base::{get_test_connection, Account},
-    SObject,
+    prelude::*
 };
 use anyhow::Result;
 use tokio_stream::StreamExt;
@@ -20,7 +17,7 @@ async fn test_bulk_query_single_type() -> Result<()> {
 
     account.create(&conn).await?;
 
-    let mut stream = Account::bulk_query(&conn, "SELECT Id, Name FROM Account", false).await?;
+    let mut stream = Account::bulk_query_t(&conn, "SELECT Id, Name FROM Account", false).await?;
 
     while let Some(act) = stream.next().await {
         let act = act?;
@@ -77,14 +74,14 @@ async fn test_bulk_query_to_update() -> Result<()> {
 
     account.create(&conn).await?;
 
-    Account::bulk_query(&conn, "SELECT Id, Name FROM Account", false)
+    Account::bulk_query_t(&conn, "SELECT Id, Name FROM Account", false)
         .await?
         .map(|r| {
             let mut r = r.unwrap();
             r.name = format!("{} Updated", r.name);
             r
         })
-        .bulk_update(&conn)
+        .bulk_update_t(&conn)
         .await?;
 
     let account = Account::retrieve(
@@ -94,7 +91,7 @@ async fn test_bulk_query_to_update() -> Result<()> {
     )
     .await?;
 
-    assert_eq!(account.name, "Bulk Query-Update Test");
+    assert_eq!(account.name, "Bulk Query-Update Test Updated");
 
     Ok(())
 }
