@@ -59,7 +59,7 @@ async fn test_generic_sobject_rows() -> Result<()> {
 async fn test_concrete_sobject_rows() -> Result<()> {
     let conn = get_test_connection().expect("No connection present");
 
-    let before_count = Account::count_query(
+    let before_count = Account::count_query_t(
         &conn,
         "SELECT count() FROM Account WHERE Name = 'Concrete Test'",
         false,
@@ -73,7 +73,7 @@ async fn test_concrete_sobject_rows() -> Result<()> {
 
     account.create(&conn).await?;
 
-    let mut accounts = Account::query_vec(
+    let mut accounts = Account::query_vec_t(
         &conn,
         "SELECT Id, Name FROM Account WHERE Name = 'Concrete Test'",
         false,
@@ -86,7 +86,7 @@ async fn test_concrete_sobject_rows() -> Result<()> {
     account.name = "Concrete Test 2".to_owned();
     account.update(&conn).await?;
 
-    let updated_account = Account::retrieve(&conn, account.id.unwrap(), None).await?;
+    let updated_account = Account::retrieve_t(&conn, account.id.unwrap(), None).await?;
     assert_eq!(updated_account.name, "Concrete Test 2");
 
     accounts[0].delete(&conn).await?;

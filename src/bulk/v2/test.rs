@@ -84,7 +84,7 @@ async fn test_bulk_query_to_update() -> Result<()> {
         .bulk_update_t(&conn)
         .await?;
 
-    let account = Account::retrieve(
+    let account = Account::retrieve_t(
         &conn,
         account.id.unwrap(),
         Some(vec!["Id".to_owned(), "Name".to_owned()]),

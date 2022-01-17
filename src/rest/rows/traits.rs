@@ -1,5 +1,5 @@
 use crate::data::{
-    DynamicallyTypedSObject, SObjectDeserialization, SObjectRepresentation, SObjectSerialization,
+    DynamicallyTypedSObject, SObjectDeserialization, SObjectSerialization,
     SObjectWithId, SingleTypedSObject, TypedSObject,
 };
 use crate::{api::Connection, data::FieldValue, data::SObjectType, data::SalesforceId};
@@ -53,13 +53,13 @@ pub trait SObjectDynamicallyTypedRetrieval: SObjectDeserialization {
 
 #[async_trait]
 pub trait SObjectSingleTypedRetrieval: SObjectDeserialization {
-    fn retrieve_request(
+    fn retrieve_request_t(
         sobject_type: &SObjectType,
         id: SalesforceId,
         fields: Option<Vec<String>>,
     ) -> SObjectRetrieveRequest<Self>;
 
-    async fn retrieve(
+    async fn retrieve_t(
         conn: &Connection,
         id: SalesforceId,
         fields: Option<Vec<String>>,
@@ -129,13 +129,13 @@ where
     T: SObjectSerialization + SObjectWithId + TypedSObject,
 {
     fn delete_request(&self) -> Result<SObjectDeleteRequest> {
-        Ok(SObjectDeleteRequest::new(self)?)
+        SObjectDeleteRequest::new(self)
     }
 
     async fn delete(&mut self, conn: &Connection) -> Result<()> {
         let result = conn.execute(&self.delete_request()?).await;
 
-        if let Ok(_) = &result {
+        if result.is_ok() {
             self.set_id(FieldValue::Null);
         }
 
@@ -146,7 +146,7 @@ where
 #[async_trait]
 impl<T> SObjectDynamicallyTypedRetrieval for T
 where
-    T: Sized + SObjectRepresentation + DynamicallyTypedSObject,
+    T: SObjectDeserialization + DynamicallyTypedSObject,
 {
     fn retrieve_request(
         sobject_type: &SObjectType,
@@ -170,9 +170,9 @@ where
 #[async_trait]
 impl<T> SObjectSingleTypedRetrieval for T
 where
-    T: Sized + SObjectRepresentation + SingleTypedSObject,
+    T: SObjectDeserialization + SingleTypedSObject,
 {
-    fn retrieve_request(
+    fn retrieve_request_t(
         sobject_type: &SObjectType,
         id: SalesforceId,
         fields: Option<Vec<String>>,
@@ -180,7 +180,7 @@ where
         SObjectRetrieveRequest::new(id, sobject_type, fields)
     }
 
-    async fn retrieve(
+    async fn retrieve_t(
         conn: &Connection,
         id: SalesforceId,
         fields: Option<Vec<String>>,

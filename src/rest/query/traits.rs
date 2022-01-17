@@ -12,7 +12,7 @@ use crate::{
 use super::{AggregateResult, QueryRequest};
 
 #[async_trait]
-pub trait Queryable: DynamicallyTypedSObject + SObjectDeserialization + Unpin {
+pub trait Queryable: DynamicallyTypedSObject + SObjectDeserialization {
     // TODO: is a default implementation here the right approach, or a blanket impl?
     async fn query(
         conn: &Connection,
@@ -61,11 +61,11 @@ pub trait Queryable: DynamicallyTypedSObject + SObjectDeserialization + Unpin {
     }
 }
 
-impl<T> Queryable for T where T: DynamicallyTypedSObject + SObjectDeserialization + Unpin {}
+impl<T> Queryable for T where T: DynamicallyTypedSObject + SObjectDeserialization {}
 
 #[async_trait]
-pub trait QueryableSingleType: SingleTypedSObject + SObjectDeserialization + Unpin {
-    async fn query(conn: &Connection, query: &str, all: bool) -> Result<ResultStream<Self>> {
+pub trait QueryableSingleType: SingleTypedSObject + SObjectDeserialization {
+    async fn query_t(conn: &Connection, query: &str, all: bool) -> Result<ResultStream<Self>> {
         let request = QueryRequest::new(query, all);
 
         Ok(conn
@@ -74,7 +74,7 @@ pub trait QueryableSingleType: SingleTypedSObject + SObjectDeserialization + Unp
             .to_result_stream(conn, &conn.get_type(Self::get_type_api_name()).await?)?)
     }
 
-    async fn aggregate_query(
+    async fn aggregate_query_t(
         conn: &Connection,
         query: &str,
         all: bool,
@@ -87,18 +87,18 @@ pub trait QueryableSingleType: SingleTypedSObject + SObjectDeserialization + Unp
             .to_result_stream(conn, &conn.get_type(Self::get_type_api_name()).await?)?)
     }
 
-    async fn count_query(conn: &Connection, query: &str, all: bool) -> Result<usize> {
+    async fn count_query_t(conn: &Connection, query: &str, all: bool) -> Result<usize> {
         let request = QueryRequest::new(query, all);
 
         Ok(conn.execute(&request).await?.total_size)
     }
 
-    async fn query_vec(conn: &Connection, query: &str, all: bool) -> Result<Vec<Self>> {
-        Ok(Self::query(conn, query, all)
+    async fn query_vec_t(conn: &Connection, query: &str, all: bool) -> Result<Vec<Self>> {
+        Ok(Self::query_t(conn, query, all)
             .await?
             .collect::<Result<Vec<Self>>>()
             .await?)
     }
 }
 
-impl<T> QueryableSingleType for T where T: SingleTypedSObject + SObjectDeserialization + Unpin {}
+impl<T> QueryableSingleType for T where T: SingleTypedSObject + SObjectDeserialization {}
