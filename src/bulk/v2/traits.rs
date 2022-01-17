@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use futures::Stream;
 use serde::Serialize;
 
-use crate::data::{
+use crate::data::traits::{
     DynamicallyTypedSObject, SObjectDeserialization, SObjectSerialization, SingleTypedSObject,
 };
 use crate::{api::Connection, data::SObjectType, streams::ResultStream};

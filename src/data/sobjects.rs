@@ -8,8 +8,8 @@ use anyhow::{Error, Result};
 use serde_json::{json, Value};
 
 use super::{
-    types::*, DynamicallyTypedSObject, SObjectDeserialization, SObjectSerialization, SObjectWithId,
-    TypedSObject,
+    types::*, traits::{DynamicallyTypedSObject, SObjectDeserialization, SObjectSerialization, SObjectWithId,
+    TypedSObject,SObjectBase}
 };
 use crate::errors::SalesforceError;
 use crate::rest::describe::SObjectDescribe;
@@ -361,6 +361,7 @@ impl SObjectSerialization for SObject {
         }
     }
 }
+impl SObjectBase for SObject {}
 
 impl SObjectDeserialization for SObject {
     fn from_value(value: &serde_json::Value, sobjecttype: &SObjectType) -> Result<SObject> {

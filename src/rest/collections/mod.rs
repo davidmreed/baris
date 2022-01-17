@@ -5,7 +5,7 @@ use crate::{
     api::{CompositeFriendlyRequest, SalesforceRequest},
     data::SObjectType,
     data::SalesforceId,
-    data::{
+    data::traits::{
         SObjectDeserialization, SObjectRepresentation, SObjectSerialization, SObjectWithId,
         TypedSObject,
     },
@@ -388,7 +388,7 @@ impl SalesforceRequest for SObjectCollectionCreateRequest {
 
     fn get_result(
         &self,
-        _conn: &crate::Connection,
+        _conn: &Connection,
         body: Option<&Value>,
     ) -> Result<Self::ReturnValue> {
         if let Some(body) = body {
@@ -530,7 +530,7 @@ impl SalesforceRequest for SObjectCollectionUpdateRequest {
 
     fn get_result(
         &self,
-        _conn: &crate::Connection,
+        _conn: &Connection,
         body: Option<&Value>,
     ) -> Result<Self::ReturnValue> {
         if let Some(body) = body {

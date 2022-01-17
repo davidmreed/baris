@@ -24,7 +24,7 @@ use crate::{
     data::DateTime,
     data::SObjectType,
     data::SalesforceId,
-    data::{SObjectDeserialization, SObjectSerialization},
+    data::traits::{SObjectDeserialization, SObjectSerialization},
     errors::SalesforceError,
     streams::value_from_csv,
     streams::{ResultStream, ResultStreamManager, ResultStreamState},
@@ -411,7 +411,7 @@ impl SalesforceRequest for BulkDmlJobStatusRequest {
 }
 
 #[derive(Deserialize)]
-struct BulkDmlResult<T>
+pub struct BulkDmlResult<T>
 where
     T: SObjectDeserialization,
 {
@@ -428,11 +428,12 @@ impl<T> BulkDmlResult<T>
 where
     T: SObjectDeserialization,
 {
-    fn get_sobject(&self, sobject_type: &SObjectType) -> Result<T> {
+    pub fn get_sobject(&self, sobject_type: &SObjectType) -> Result<T> {
         T::from_value(&self.data, sobject_type)
     }
 }
-struct BulkDmlJobSuccessfulRecordsRequest<T>
+
+pub struct BulkDmlJobSuccessfulRecordsRequest<T>
 where
     T: SObjectDeserialization,
 {
@@ -472,8 +473,11 @@ where
         ))
     }
 }
+
+// TODO
 pub struct BulkDmlJobFailedRecordsRequest {}
 pub struct BulkDmlJobUnprocessedRecordsRequest {}
+
 pub struct BulkDmlJobSetStatusRequest {
     id: SalesforceId,
     status: BulkJobStatus,
@@ -638,7 +642,7 @@ pub struct BulkDmlJob {
 }
 
 impl BulkDmlJob {
-    async fn query(
+    pub async fn query(
         conn: &Connection,
         is_pk_chunking_enabled: Option<bool>,
         job_type: Option<BulkApiJobType>,
@@ -653,7 +657,7 @@ impl BulkDmlJob {
             .await?)
     }
 
-    async fn create(
+    pub async fn create(
         conn: &Connection,
         operation: BulkApiDmlOperation,
         object: String,
@@ -663,7 +667,7 @@ impl BulkDmlJob {
             .await?)
     }
 
-    async fn ingest<T>(
+    pub async fn ingest<T>(
         &self,
         conn: &Connection,
         records: impl Stream<Item = T> + 'static + Send + Sync,
@@ -676,7 +680,7 @@ impl BulkDmlJob {
             .await?)
     }
 
-    async fn complete(&self, conn: &Connection) -> Result<Self> {
+    pub async fn complete(&self, conn: &Connection) -> Result<Self> {
         loop {
             let status = self.check_status(&conn).await?;
 
@@ -688,11 +692,11 @@ impl BulkDmlJob {
         }
     }
 
-    async fn check_status(&self, conn: &Connection) -> Result<Self> {
+    pub async fn check_status(&self, conn: &Connection) -> Result<Self> {
         Ok(conn.execute(&BulkDmlJobStatusRequest::new(self.id)).await?)
     }
 
-    async fn abort(&self, conn: &Connection) -> Result<Self> {
+    pub async fn abort(&self, conn: &Connection) -> Result<Self> {
         Ok(conn
             .execute(&BulkDmlJobSetStatusRequest::new(
                 self.id,
@@ -701,7 +705,7 @@ impl BulkDmlJob {
             .await?)
     }
 
-    async fn close(&self, conn: &Connection) -> Result<Self> {
+    pub async fn close(&self, conn: &Connection) -> Result<Self> {
         Ok(conn
             .execute(&BulkDmlJobSetStatusRequest::new(
                 self.id,
@@ -710,7 +714,7 @@ impl BulkDmlJob {
             .await?)
     }
 
-    async fn delete(&self, conn: &Connection) -> Result<()> {
+    pub async fn delete(&self, conn: &Connection) -> Result<()> {
         Ok(conn.execute(&BulkDmlJobDeleteRequest::new(self.id)).await?)
     }
 }

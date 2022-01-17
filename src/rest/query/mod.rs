@@ -9,7 +9,7 @@ use tokio::{spawn, task::JoinHandle};
 use crate::{
     api::Connection,
     api::SalesforceRequest,
-    data::SObjectDeserialization,
+    data::traits::{SObjectDeserialization, SObjectBase},
     data::SObjectType,
     errors::SalesforceError,
     streams::{ResultStream, ResultStreamManager, ResultStreamState},
@@ -21,6 +21,7 @@ pub mod traits;
 mod test;
 
 pub struct AggregateResult(Map<String, Value>);
+impl SObjectBase for AggregateResult {}
 
 impl SObjectDeserialization for AggregateResult {
     fn from_value(value: &Value, _sobjecttype: &SObjectType) -> Result<Self> {

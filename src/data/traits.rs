@@ -103,7 +103,6 @@ pub trait SObjectSerialization: SObjectBase {
     fn to_value_with_options(&self, include_type: bool, include_id: bool) -> Result<Value>;
 }
 
-// TODO: How can we scope down this blanket impl?
 impl<'a, T> SObjectDeserialization for T
 where
     T: for<'de> serde::Deserialize<'de> + SObjectBase,
@@ -159,4 +158,4 @@ where
     }
 }
 
-pub trait SObjectBase : Sized + Send + Sync + Unpin + 'static;
+pub trait SObjectBase : Sized + Send + Sync + Unpin + 'static {}

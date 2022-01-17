@@ -1,5 +1,5 @@
 use crate::data::{
-    DynamicallyTypedSObject, SObjectDeserialization, SObjectRepresentation, SingleTypedSObject,
+    DynamicallyTypedSObject, SObjectDeserialization, SObjectSerialization, SObjectRepresentation, SingleTypedSObject, SObjectWithId, TypedSObject
 };
 use crate::{api::Connection, data::FieldValue, data::SObjectType, data::SalesforceId};
 use anyhow::Result;
@@ -35,7 +35,7 @@ pub trait SObjectRowDeletable {
 }
 
 #[async_trait]
-pub trait SObjectDynamicallyTypedRetrieval: Sized + SObjectDeserialization {
+pub trait SObjectDynamicallyTypedRetrieval: SObjectDeserialization {
     fn retrieve_request(
         sobject_type: &SObjectType,
         id: SalesforceId,
@@ -51,7 +51,7 @@ pub trait SObjectDynamicallyTypedRetrieval: Sized + SObjectDeserialization {
 }
 
 #[async_trait]
-pub trait SObjectSingleTypedRetrieval: Sized + SObjectDeserialization {
+pub trait SObjectSingleTypedRetrieval: SObjectDeserialization {
     fn retrieve_request(
         sobject_type: &SObjectType,
         id: SalesforceId,
@@ -66,7 +66,7 @@ pub trait SObjectSingleTypedRetrieval: Sized + SObjectDeserialization {
 }
 
 #[async_trait]
-impl<T> SObjectRowCreateable for T where T: SObjectSerialization {
+impl<T> SObjectRowCreateable for T where T: SObjectSerialization + SObjectWithId + TypedSObject {
     fn create_request(&self) -> Result<SObjectCreateRequest> {
         Ok(SObjectCreateRequest::new(self)?)
     }
@@ -82,7 +82,7 @@ impl<T> SObjectRowCreateable for T where T: SObjectSerialization {
 }
 
 #[async_trait]
-impl<T> SObjectRowUpdateable for T where T: SObjectSerialization {
+impl<T> SObjectRowUpdateable for T where T: SObjectSerialization + SObjectWithId + TypedSObject {
     fn update_request(&self) -> Result<SObjectUpdateRequest> {
         Ok(SObjectUpdateRequest::new(self)?)
     }
@@ -93,7 +93,7 @@ impl<T> SObjectRowUpdateable for T where T: SObjectSerialization {
 }
 
 #[async_trait]
-impl<T> SObjectRowUpsertable for T where T: SObjectSerialization {
+impl<T> SObjectRowUpsertable for T where T: SObjectSerialization + SObjectWithId + TypedSObject {
     fn upsert_request(&self, external_id: &str) -> Result<SObjectUpsertRequest> {
         Ok(SObjectUpsertRequest::new(self, external_id)?)
     }
@@ -114,7 +114,7 @@ impl<T> SObjectRowUpsertable for T where T: SObjectSerialization {
 }
 
 #[async_trait]
-impl<T> SObjectRowDeletable for T where T: SObjectSerialization {
+impl<T> SObjectRowDeletable for T where T: SObjectSerialization + SObjectWithId + TypedSObject {
     fn delete_request(&self) -> Result<SObjectDeleteRequest> {
         Ok(SObjectDeleteRequest::new(self)?)
     }

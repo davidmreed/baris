@@ -13,7 +13,8 @@ use futures::Stream;
 use serde::{Serialize, Serializer};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{rest::rows::BlobRetrieveRequest, Connection, SalesforceError};
+use crate::{rest::rows::BlobRetrieveRequest, api::Connection, errors::SalesforceError};
+
 
 #[derive(Serialize, Deserialize, Copy, Clone, PartialEq)]
 #[serde(try_from = "String")]

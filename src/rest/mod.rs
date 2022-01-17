@@ -1,4 +1,4 @@
-use crate::{SalesforceError, SalesforceId};
+use crate::{errors::SalesforceError, data::SalesforceId};
 
 use serde_derive::Deserialize;
 use std::error::Error;
