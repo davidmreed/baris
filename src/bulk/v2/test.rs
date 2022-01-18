@@ -1,6 +1,6 @@
 use crate::{
+    prelude::*,
     test_integration_base::{get_test_connection, Account},
-    prelude::*
 };
 use anyhow::Result;
 use tokio_stream::StreamExt;

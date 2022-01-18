@@ -66,7 +66,7 @@ where
                 if r.success {
                     self.get_mut(i)
                         .unwrap()
-                        .set_id(FieldValue::Id(r.id.unwrap()));
+                        .set_id(FieldValue::Id(r.id.unwrap()))?;
                 }
 
                 r.into()
@@ -123,7 +123,7 @@ where
                     if let Some(true) = r.created {
                         self.get_mut(i)
                             .unwrap()
-                            .set_id(FieldValue::Id(r.id.unwrap()));
+                            .set_id(FieldValue::Id(r.id.unwrap()))?;
                     }
                 }
 
@@ -150,7 +150,7 @@ where
             .enumerate()
             .map(|(i, r)| {
                 if r.success {
-                    self.get_mut(i).unwrap().set_id(FieldValue::Null);
+                    self.get_mut(i).unwrap().set_id(FieldValue::Null)?;
                 }
 
                 r.into()

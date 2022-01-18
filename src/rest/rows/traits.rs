@@ -1,6 +1,6 @@
 use crate::data::{
-    DynamicallyTypedSObject, SObjectDeserialization, SObjectSerialization,
-    SObjectWithId, SingleTypedSObject, TypedSObject,
+    DynamicallyTypedSObject, SObjectDeserialization, SObjectSerialization, SObjectWithId,
+    SingleTypedSObject, TypedSObject,
 };
 use crate::{api::Connection, data::FieldValue, data::SObjectType, data::SalesforceId};
 use anyhow::Result;
@@ -72,14 +72,14 @@ where
     T: SObjectSerialization + SObjectWithId + TypedSObject,
 {
     fn create_request(&self) -> Result<SObjectCreateRequest> {
-        Ok(SObjectCreateRequest::new(self)?)
+        SObjectCreateRequest::new(self)
     }
 
     async fn create(&mut self, conn: &Connection) -> Result<()> {
         let result = conn.execute(&self.create_request()?).await?;
 
         if result.success {
-            self.set_id(FieldValue::Id(result.id.unwrap()));
+            self.set_id(FieldValue::Id(result.id.unwrap()))?;
         }
         result.into()
     }
@@ -91,7 +91,7 @@ where
     T: SObjectSerialization + SObjectWithId + TypedSObject,
 {
     fn update_request(&self) -> Result<SObjectUpdateRequest> {
-        Ok(SObjectUpdateRequest::new(self)?)
+        SObjectUpdateRequest::new(self)
     }
 
     async fn update(&mut self, conn: &Connection) -> Result<()> {
@@ -105,7 +105,7 @@ where
     T: SObjectSerialization + SObjectWithId + TypedSObject,
 {
     fn upsert_request(&self, external_id: &str) -> Result<SObjectUpsertRequest> {
-        Ok(SObjectUpsertRequest::new(self, external_id)?)
+        SObjectUpsertRequest::new(self, external_id)
     }
 
     async fn upsert(&mut self, conn: &Connection, external_id: &str) -> Result<()> {
@@ -115,7 +115,7 @@ where
             // In version 46.0 and earlier, the `created` return value
             // is not available for upsert requests.
             if let Some(id) = result.id {
-                self.set_id(FieldValue::Id(id));
+                self.set_id(FieldValue::Id(id))?;
             }
         }
 
@@ -136,7 +136,7 @@ where
         let result = conn.execute(&self.delete_request()?).await;
 
         if result.is_ok() {
-            self.set_id(FieldValue::Null);
+            self.set_id(FieldValue::Null)?;
         }
 
         result

@@ -2,10 +2,7 @@ use anyhow::Result;
 use bytes::{BufMut, BytesMut};
 use futures::StreamExt;
 
-use crate::{
-    prelude::*,
-    test_integration_base::get_test_connection,
-};
+use crate::{prelude::*, test_integration_base::get_test_connection};
 
 use super::*;
 

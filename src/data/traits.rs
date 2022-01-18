@@ -43,7 +43,7 @@ pub trait TypedSObject {
 /// in a panic.
 pub trait SObjectWithId: SObjectBase {
     fn get_id(&self) -> FieldValue;
-    fn set_id(&mut self, id: FieldValue);
+    fn set_id(&mut self, id: FieldValue) -> Result<()>;
 
     fn get_opt_id(&self) -> Option<SalesforceId> {
         let id = self.get_id();
@@ -53,12 +53,12 @@ pub trait SObjectWithId: SObjectBase {
         }
     }
 
-    fn set_opt_id(&mut self, id: Option<SalesforceId>) {
+    fn set_opt_id(&mut self, id: Option<SalesforceId>) -> Result<()> {
         self.set_id(if let Some(id) = id {
             FieldValue::Id(id)
         } else {
             FieldValue::Null
-        });
+        })
     }
 }
 

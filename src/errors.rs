@@ -14,6 +14,7 @@ pub enum SalesforceError {
     UnknownError,
     NotAuthenticated,
     DateTimeError,
+    UnsupportedId,
 }
 
 impl fmt::Display for SalesforceError {
@@ -44,6 +45,9 @@ impl fmt::Display for SalesforceError {
             }
             SalesforceError::DateTimeError => {
                 write!(f, "An date, time, or datetime value could not be created")
+            },
+            SalesforceError::UnsupportedId => {
+                write!(f, "An unsupported Id type (such as a null or composite reference) was provided")
             }
         }
     }

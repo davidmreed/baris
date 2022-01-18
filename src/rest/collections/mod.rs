@@ -346,7 +346,7 @@ impl SObjectCollectionCreateRequest {
             all_or_none,
         }
     }
-    pub fn new<T>(objects: &Vec<T>, all_or_none: bool) -> Result<Self>
+    pub fn new<T>(objects: &[T], all_or_none: bool) -> Result<Self>
     where
         T: SObjectSerialization + SObjectWithId,
     {

@@ -3,9 +3,8 @@ use reqwest::Url;
 use serde_derive::{Deserialize, Serialize};
 use std::env;
 
-use crate::data::{SObjectWithId, SingleTypedSObject, SObjectBase};
-use crate::{auth::AccessTokenAuth, api::Connection};
-use crate::data::{FieldValue, SalesforceId};
+use crate::prelude::*;
+use crate::{api::Connection, auth::AccessTokenAuth};
 
 pub fn get_test_connection() -> Result<Connection> {
     let access_token = env::var("SESSION_ID")?;
@@ -31,23 +30,27 @@ impl SObjectBase for Account {}
 
 impl SObjectWithId for Account {
     fn get_id(&self) -> FieldValue {
-        if let Some(id) = self.id {
-            FieldValue::Id(id)
-        } else {
-            FieldValue::Null
+        match self.get_opt_id() {
+            Some(id) => FieldValue::Id(id),
+            None => FieldValue::Null
         }
     }
 
-    fn set_id(&mut self, id: FieldValue) {
+    fn set_id(&mut self, id: FieldValue) -> Result<()> {
         match id {
-            FieldValue::Id(id) => {
-                self.id = Some(id);
-            }
-            FieldValue::Null => self.id = None,
-            _ => {
-                panic!("Invalid id: {:?}", id);
-            }
+            FieldValue::Id(id) => {self.set_opt_id(Some(id))?; Ok(())},
+            FieldValue::Null => {self.set_opt_id(None)?; Ok(())},
+            _ => Err(SalesforceError::UnsupportedId.into())
         }
+    }
+
+    fn get_opt_id(&self) -> Option<crate::data::types::SalesforceId> {
+        self.id
+    }
+
+    fn set_opt_id(&mut self, id: Option<crate::data::types::SalesforceId>) -> Result<()> {
+        self.id = id;
+        Ok(())
     }
 }
 

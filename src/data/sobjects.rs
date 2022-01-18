@@ -296,8 +296,11 @@ impl SObjectWithId for SObject {
         self.get("id").unwrap_or(&FieldValue::Null).clone()
     }
 
-    fn set_id(&mut self, id: FieldValue) {
-        self.put("id", id); // TODO: validate + panic?
+    fn set_id(&mut self, id: FieldValue) -> Result<()> {
+        match id {
+            FieldValue::Id(_) | FieldValue::Null | FieldValue::CompositeReference(_) => { self.put("id", id); Ok(()) }
+            _ => Err(SalesforceError::UnsupportedId.into())
+        }
     }
 }
 
