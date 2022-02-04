@@ -49,10 +49,7 @@ pub enum BulkJobStatus {
 
 impl BulkJobStatus {
     pub fn is_completed_state(&self) -> bool {
-        match self {
-            Self::UploadComplete | Self::InProgress | Self::Open => false,
-            _ => true,
-        }
+        !matches!(self, Self::UploadComplete | Self::InProgress | Self::Open)
     }
 }
 
@@ -119,7 +116,7 @@ struct BulkQueryLocatorManager<T: SObjectDeserialization> {
 
 impl<T> ResultStreamManager for BulkQueryLocatorManager<T>
 where
-    T: SObjectDeserialization + Send + Sync + 'static,
+    T: SObjectDeserialization,
 {
     type Output = T;
 
@@ -129,7 +126,7 @@ where
     ) -> JoinHandle<Result<ResultStreamState<T>>> {
         let conn = self.conn.clone();
         let sobject_type = self.sobject_type.clone();
-        let job_id = self.job_id.clone();
+        let job_id = self.job_id;
         let mut locator = None;
 
         if let Some(state) = state {

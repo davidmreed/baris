@@ -45,8 +45,8 @@ pub fn sobject_representation_derive(input: TokenStream) -> TokenStream {
 
             fn set_id(&mut self, id: FieldValue) -> Result<()> {
                 match id {
-                    FieldValue::Id(id) => {self.set_opt_id(Some(id)); Ok(())},
-                    FieldValue::Null => {self.set_opt_id(None); Ok(())},
+                    FieldValue::Id(id) => {self.set_opt_id(Some(id))?; Ok(())},
+                    FieldValue::Null => {self.set_opt_id(None)?; Ok(())},
                     _ => Err(SalesforceError::UnsupportedId.into())
                 }
             }
@@ -66,6 +66,8 @@ pub fn sobject_representation_derive(input: TokenStream) -> TokenStream {
                 #name
             }
         }
+
+        impl baris::data::traits::SObjectBase for #ident {}
     };
     gen.into()
 }

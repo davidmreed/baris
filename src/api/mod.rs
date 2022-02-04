@@ -82,26 +82,22 @@ impl Deref for Connection {
 
 impl Clone for Connection {
     fn clone(&self) -> Self {
-        Connection {
-            0: Arc::clone(&self.0),
-        }
+        Connection(Arc::clone(&self.0))
     }
 }
 
 impl Connection {
     pub fn new(auth: Box<dyn Authentication>, api_version: &str) -> Result<Connection> {
-        Ok(Connection {
-            0: Arc::new(ConnectionBody {
-                api_version: api_version.to_string(),
-                sobject_types: RwLock::new(HashMap::new()),
-                auth: RwLock::new(auth),
-                auth_refresh: Mutex::new(()),
-                auth_global_lock: Mutex::new(()),
-            }),
-        })
+        Ok(Connection(Arc::new(ConnectionBody {
+            api_version: api_version.to_string(),
+            sobject_types: RwLock::new(HashMap::new()),
+            auth: RwLock::new(auth),
+            auth_refresh: Mutex::new(()),
+            auth_global_lock: Mutex::new(()),
+        })))
     }
 
-    pub async fn get_base_url(&self) -> Result<Url> {
+    pub async fn get_instance_url(&self) -> Result<Url> {
         if self.get_current_access_token().await.is_none() {
             // We haven't done an initial token refresh yet, so we may not have
             // the right instance_url set.
@@ -110,8 +106,13 @@ impl Connection {
 
         let lock = self.auth.read().await;
 
-        Ok(lock
-            .get_instance_url() // TODO: this is why the refresh is in this method (above )
+        Ok(lock.get_instance_url().await?.clone())
+        // TODO: this is why the refresh is in this method (above )
+    }
+
+    pub async fn get_base_url(&self) -> Result<Url> {
+        Ok(self
+            .get_instance_url()
             .await?
             .join(&self.get_base_url_path())?)
     }
@@ -292,9 +293,9 @@ impl Connection {
         result = result.error_for_status()?;
 
         if result.status() == StatusCode::NO_CONTENT {
-            Ok(request.get_result(&self, None)?)
+            Ok(request.get_result(self, None)?)
         } else {
-            Ok(request.get_result(&self, Some(&result.json().await?))?)
+            Ok(request.get_result(self, Some(&result.json().await?))?)
         }
     }
 }

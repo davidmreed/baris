@@ -126,6 +126,7 @@ where
                     self.state = Some(result??);
 
                     self.retrieve_task = None;
+                    // Fall through, next loop iteration will yield
                 } else {
                     return Poll::Pending;
                 }
@@ -133,6 +134,10 @@ where
                 if state.done {
                     // If we are done, return a sigil.
                     return Poll::Ready(None);
+                } else {
+                    // Create a new task to get the next state.
+                    let state = mem::take(&mut self.state);
+                    self.retrieve_task = Some(self.manager.get_next_future(state));
                 }
             } else {
                 // Create a new task to get the next state.

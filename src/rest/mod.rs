@@ -40,7 +40,7 @@ impl fmt::Display for ApiError {
         write!(
             f,
             "{} ({})",
-            self.get_error_code().unwrap_or_else(|| error),
+            self.get_error_code().unwrap_or(error),
             self.message,
         )
     }
@@ -71,48 +71,46 @@ pub struct DmlResult {
     pub errors: Vec<DmlError>,
 }
 
-impl Into<Result<SalesforceId>> for DmlResult {
-    fn into(self) -> Result<SalesforceId> {
-        if !self.success {
-            if self.errors.len() > 0 {
+impl From<DmlResult> for Result<SalesforceId> {
+    fn from(val: DmlResult) -> Self {
+        if !val.success {
+            if !val.errors.is_empty() {
                 // TODO: handle multiple errors, if this ever happens.
-                let err = self.errors[0].clone();
+                let err = val.errors[0].clone();
+                Err(err.into())
+            } else {
+                Err(SalesforceError::UnknownError.into())
+            }
+        } else if let Some(id) = val.id {
+            Ok(id)
+        } else {
+            Err(SalesforceError::UnknownError.into()) // TODO: specificity
+        }
+    }
+}
+
+impl From<DmlResult> for Result<Option<SalesforceId>> {
+    fn from(val: DmlResult) -> Self {
+        if !val.success {
+            if !val.errors.is_empty() {
+                // TODO: handle multiple errors, if this ever happens.
+                let err = val.errors[0].clone();
                 Err(err.into())
             } else {
                 Err(SalesforceError::UnknownError.into())
             }
         } else {
-            if let Some(id) = self.id {
-                Ok(id)
-            } else {
-                Err(SalesforceError::UnknownError.into()) // TODO: specificity
-            }
+            Ok(val.id)
         }
     }
 }
 
-impl Into<Result<Option<SalesforceId>>> for DmlResult {
-    fn into(self) -> Result<Option<SalesforceId>> {
-        if !self.success {
-            if self.errors.len() > 0 {
+impl From<DmlResult> for Result<()> {
+    fn from(val: DmlResult) -> Self {
+        if !val.success {
+            if !val.errors.is_empty() {
                 // TODO: handle multiple errors, if this ever happens.
-                let err = self.errors[0].clone();
-                Err(err.into())
-            } else {
-                Err(SalesforceError::UnknownError.into())
-            }
-        } else {
-            Ok(self.id)
-        }
-    }
-}
-
-impl Into<Result<()>> for DmlResult {
-    fn into(self) -> Result<()> {
-        if !self.success {
-            if self.errors.len() > 0 {
-                // TODO: handle multiple errors, if this ever happens.
-                Err(self.errors[0].clone().into())
+                Err(val.errors[0].clone().into())
             } else {
                 Err(SalesforceError::UnknownError.into())
             }

@@ -19,9 +19,8 @@ async fn test_collection_stream_create() -> Result<()> {
 
     let mut count = 0;
     while let Some(r) = stream.next().await {
-        match r {
-            Ok(_) => count += 1,
-            _ => {}
+        if r.is_ok() {
+            count += 1
         }
     }
 

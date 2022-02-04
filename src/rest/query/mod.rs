@@ -144,18 +144,18 @@ where
     ) -> JoinHandle<Result<ResultStreamState<T>>> {
         let conn = self.conn.clone();
         let sobject_type = self.sobject_type.clone();
-
         spawn(async move {
+            let locator = state.unwrap().locator.unwrap();
             let result: QueryResult = conn
                 .get_client()
                 .await?
-                .get(state.unwrap().locator.unwrap())
+                .get(conn.get_instance_url().await?.join(&locator)?)
                 .send()
                 .await?
                 .json()
                 .await?;
 
-            Ok(result.to_result_stream_state(&sobject_type)?)
+            result.to_result_stream_state(&sobject_type)
         })
     }
 }

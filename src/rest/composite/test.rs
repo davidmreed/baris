@@ -13,15 +13,15 @@ async fn test_composite_request_create_with_reference() -> Result<()> {
     let mut request = CompositeRequest::new(conn.get_base_url_path(), Some(true), Some(false));
     let account_type = &conn.get_type("Account").await?;
     let contact_type = &conn.get_type("Contact").await?;
-    let account = SObject::new(&account_type).with_str("Name", "Test");
-    let contact = SObject::new(&contact_type)
+    let account = SObject::new(account_type).with_str("Name", "Test");
+    let contact = SObject::new(contact_type)
         .with_str("LastName", "Foo")
         .with_composite_reference("AccountId", "@{acct.id}");
-    let mut account_request = SObjectCreateRequest::new(&account)?;
-    let mut contact_request = SObjectCreateRequest::new(&contact)?;
+    let account_request = SObjectCreateRequest::new(&account)?;
+    let contact_request = SObjectCreateRequest::new(&contact)?;
 
-    request.add("acct", &mut account_request)?;
-    request.add("ct", &mut contact_request)?;
+    request.add("acct", &account_request)?;
+    request.add("ct", &contact_request)?;
 
     let result = conn.execute(&request).await?;
 
@@ -32,9 +32,9 @@ async fn test_composite_request_create_with_reference() -> Result<()> {
     assert!(contact_result.success);
 
     let mut account =
-        SObject::retrieve(&conn, &account_type, account_result.id.unwrap(), None).await?;
+        SObject::retrieve(&conn, account_type, account_result.id.unwrap(), None).await?;
     let mut contact =
-        SObject::retrieve(&conn, &contact_type, contact_result.id.unwrap(), None).await?;
+        SObject::retrieve(&conn, contact_type, contact_result.id.unwrap(), None).await?;
 
     assert_eq!(
         contact.get("AccountId").unwrap(),

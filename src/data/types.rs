@@ -103,13 +103,13 @@ impl DateTime {
         seconds: u32,
         milliseconds: u32,
     ) -> Result<DateTime> {
-        Ok(DateTime {
-            0: chrono::Utc
+        Ok(DateTime(
+            chrono::Utc
                 .ymd_opt(year, month, day)
                 .and_hms_milli_opt(hours, minutes, seconds, milliseconds)
                 .single()
                 .ok_or(SalesforceError::DateTimeError)?,
-        })
+        ))
     }
 }
 
@@ -127,20 +127,16 @@ impl TryFrom<String> for DateTime {
         // Salesforce's version of RFC3339 doesn't include a colon as required by the standard,
         // giving +0000 instead of the expected +00:00
 
-        Ok(DateTime {
-            0: chrono::DateTime::parse_from_str(&value, "%Y-%m-%dT%H:%M:%S%.3f%z")?
+        Ok(DateTime(
+            chrono::DateTime::parse_from_str(&value, "%Y-%m-%dT%H:%M:%S%.3f%z")?
                 .with_timezone(&Utc),
-        })
+        ))
     }
 }
 
 impl Display for DateTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.0.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string()
-        )
+        write!(f, "{}", self.0.format("%Y-%m-%dT%H:%M:%S%.3f%z"))
     }
 }
 
@@ -168,10 +164,10 @@ pub struct Time(chrono::NaiveTime);
 
 impl Time {
     pub fn new(hour: u32, min: u32, sec: u32, milli: u32) -> Result<Time> {
-        Ok(Time {
-            0: chrono::NaiveTime::from_hms_milli_opt(hour, min, sec, milli)
+        Ok(Time(
+            chrono::NaiveTime::from_hms_milli_opt(hour, min, sec, milli)
                 .ok_or(SalesforceError::DateTimeError)?,
-        })
+        ))
     }
 }
 
@@ -186,15 +182,16 @@ impl TryFrom<String> for Time {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        Ok(Time {
-            0: chrono::NaiveTime::parse_from_str(&value, "%H:%M:%S%.3fZ")?,
-        })
+        Ok(Time(chrono::NaiveTime::parse_from_str(
+            &value,
+            "%H:%M:%S%.3fZ",
+        )?))
     }
 }
 
 impl Display for Time {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.format("%H:%M:%S%.3fZ").to_string())
+        write!(f, "{}", self.0.format("%H:%M:%S%.3fZ"))
     }
 }
 
@@ -221,10 +218,10 @@ pub struct Date(chrono::NaiveDate);
 
 impl Date {
     pub fn new(year: i32, month: u32, day: u32) -> Result<Date> {
-        Ok(Date {
-            0: chrono::NaiveDate::from_ymd_opt(year, month, day)
+        Ok(Date(
+            chrono::NaiveDate::from_ymd_opt(year, month, day)
                 .ok_or(SalesforceError::DateTimeError)?,
-        })
+        ))
     }
 }
 
@@ -239,15 +236,13 @@ impl TryFrom<String> for Date {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        Ok(Date {
-            0: chrono::NaiveDate::parse_from_str(&value, "%Y-%m-%d")?,
-        })
+        Ok(Date(chrono::NaiveDate::parse_from_str(&value, "%Y-%m-%d")?))
     }
 }
 
 impl Display for Date {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.format("%Y-%m-%d").to_string())
+        write!(f, "{}", self.0.format("%Y-%m-%d"))
     }
 }
 
@@ -286,7 +281,7 @@ impl TryFrom<String> for Blob {
     type Error = Infallible;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        Ok(Blob { 0: value })
+        Ok(Blob(value))
     }
 }
 
