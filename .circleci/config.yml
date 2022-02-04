@@ -11,44 +11,44 @@ jobs:
       name: rust/default
       tag: 1.58.1
     steps:
+      - checkout
       - run:
           name: Select Nightly Rust
           command: |
             rustup default nightly
-      - checkout
       - rust/clippy
   format:
     executor:
       name: rust/default
       tag: 1.58.1
     steps:
+      - checkout
       - run:
           name: Select Nightly Rust
           command: |
             rustup default nightly
-      - checkout
       - rust/format
   test:
     executor:
       name: rust/default
       tag: 1.58.1
     steps:
+      - checkout
       - run:
           name: Select Nightly Rust
           command: |
             rustup default nightly
-      - checkout
       - rust/test
   integration-test:
     executor:
       name: rust/default
       tag: 1.58.1
     steps:
+      - checkout
       - run:
           name: Select Nightly Rust
           command: |
             rustup default nightly
-      - checkout
       - run:
           name: Integration Test
           command: |
