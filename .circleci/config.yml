@@ -11,6 +11,10 @@ jobs:
       name: rust/default
       tag: 1.58.1
     steps:
+      - run:
+        name: Select Nightly Rust
+        command: |
+          rustup default nightly
       - checkout
       - rust/clippy
   format:
@@ -18,6 +22,10 @@ jobs:
       name: rust/default
       tag: 1.58.1
     steps:
+      - run:
+        name: Select Nightly Rust
+        command: |
+          rustup default nightly
       - checkout
       - rust/format
   test:
@@ -25,6 +33,10 @@ jobs:
       name: rust/default
       tag: 1.58.1
     steps:
+      - run:
+        name: Select Nightly Rust
+        command: |
+          rustup default nightly
       - checkout
       - rust/test
 
