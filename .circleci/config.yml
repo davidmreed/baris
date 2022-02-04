@@ -12,9 +12,9 @@ jobs:
       tag: 1.58.1
     steps:
       - run:
-        name: Select Nightly Rust
-        command: |
-          rustup default nightly
+          name: Select Nightly Rust
+          command: |
+            rustup default nightly
       - checkout
       - rust/clippy
   format:
@@ -23,9 +23,9 @@ jobs:
       tag: 1.58.1
     steps:
       - run:
-        name: Select Nightly Rust
-        command: |
-          rustup default nightly
+          name: Select Nightly Rust
+          command: |
+            rustup default nightly
       - checkout
       - rust/format
   test:
@@ -34,11 +34,25 @@ jobs:
       tag: 1.58.1
     steps:
       - run:
-        name: Select Nightly Rust
-        command: |
-          rustup default nightly
+          name: Select Nightly Rust
+          command: |
+            rustup default nightly
       - checkout
       - rust/test
+  integration-test:
+    executor:
+      name: rust/default
+      tag: 1.58.1
+    steps:
+      - run:
+          name: Select Nightly Rust
+          command: |
+            rustup default nightly
+      - checkout
+      - run:
+          name: Integration Test
+          command: |
+            cargo test -- --ignored
 
 workflows:
   test:
