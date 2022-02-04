@@ -9,14 +9,17 @@ jobs:
   clippy:
     executor: rust/default
     steps:
+      - checkout
       - rust/clippy
   format:
     executor: rust/default
     steps:
+      - checkout
       - rust/format
   test:
     executor: rust/default
     steps:
+      - checkout
       - rust/test
 
 # Invoke jobs via workflows
