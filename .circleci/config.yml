@@ -7,23 +7,27 @@ orbs:
 
 jobs:
   clippy:
-    executor: rust/default
+    executor:
+      name: rust/default
+      tag: 1.58.1
     steps:
       - checkout
       - rust/clippy
   format:
-    executor: rust/default
+    executor:
+      name: rust/default
+      tag: 1.58.1
     steps:
       - checkout
       - rust/format
   test:
-    executor: rust/default
+    executor:
+      name: rust/default
+      tag: 1.58.1
     steps:
       - checkout
       - rust/test
 
-# Invoke jobs via workflows
-# See: https://circleci.com/docs/2.0/configuration-reference/#workflows
 workflows:
   test:
     jobs:
