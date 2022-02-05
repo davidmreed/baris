@@ -26,7 +26,7 @@ impl SObjectBase for AggregateResult {}
 impl SObjectDeserialization for AggregateResult {
     fn from_value(value: &Value, _sobjecttype: &SObjectType) -> Result<Self> {
         if let Value::Object(map) = value {
-            Ok(AggregateResult { 0: map.clone() }) // TODO: don't clone.
+            Ok(AggregateResult(map.clone())) // TODO: don't clone.
         } else {
             Err(SalesforceError::UnknownError.into()) // TODO
         }

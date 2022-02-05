@@ -42,17 +42,13 @@ impl Deref for SObjectType {
 
 impl Clone for SObjectType {
     fn clone(&self) -> Self {
-        SObjectType {
-            0: Arc::clone(&self.0),
-        }
+        SObjectType(Arc::clone(&self.0))
     }
 }
 
 impl SObjectType {
     pub fn new(api_name: String, describe: SObjectDescribe) -> SObjectType {
-        SObjectType {
-            0: Arc::new(SObjectTypeBody { api_name, describe }),
-        }
+        SObjectType(Arc::new(SObjectTypeBody { api_name, describe }))
     }
 
     pub fn get_describe(&self) -> &SObjectDescribe {
@@ -90,77 +86,60 @@ pub enum FieldValue {
 }
 
 impl FieldValue {
-    // TODO: ensure these are complete.
-    pub fn is_int(&self) -> bool {
-        if let FieldValue::Integer(_) = &self {
-            true
-        } else {
-            false
-        }
+    pub fn is_address(&self) -> bool {
+        matches!(self, FieldValue::Address(_))
     }
 
-    pub fn is_bool(&self) -> bool {
-        if let FieldValue::Boolean(_) = &self {
-            true
-        } else {
-            false
-        }
+    pub fn is_int(&self) -> bool {
+        matches!(self, FieldValue::Integer(_))
     }
 
     pub fn is_double(&self) -> bool {
-        if let FieldValue::Double(_) = &self {
-            true
-        } else {
-            false
-        }
+        matches!(self, FieldValue::Double(_))
+    }
+
+    pub fn is_bool(&self) -> bool {
+        matches!(self, FieldValue::Boolean(_))
     }
 
     pub fn is_string(&self) -> bool {
-        if let FieldValue::String(_) = &self {
-            true
-        } else {
-            false
-        }
+        matches!(self, FieldValue::String(_))
     }
 
     pub fn is_date_time(&self) -> bool {
-        if let FieldValue::DateTime(_) = &self {
-            true
-        } else {
-            false
-        }
+        matches!(self, FieldValue::DateTime(_))
     }
 
     pub fn is_date(&self) -> bool {
-        if let FieldValue::Date(_) = &self {
-            true
-        } else {
-            false
-        }
+        matches!(self, FieldValue::Date(_))
     }
 
     pub fn is_time(&self) -> bool {
-        if let FieldValue::Time(_) = &self {
-            true
-        } else {
-            false
-        }
+        matches!(self, FieldValue::Time(_))
     }
 
     pub fn is_id(&self) -> bool {
-        if let FieldValue::Id(_) = &self {
-            true
-        } else {
-            false
-        }
+        matches!(self, FieldValue::Id(_))
     }
 
     pub fn is_null(&self) -> bool {
-        if let FieldValue::Null = &self {
-            true
-        } else {
-            false
-        }
+        matches!(self, FieldValue::Null)
+    }
+
+    pub fn is_geolocation(&self) -> bool {
+        matches!(self, FieldValue::Geolocation(_))
+    }
+
+    pub fn is_relationship(&self) -> bool {
+        matches!(self, FieldValue::Relationship(_))
+    }
+
+    pub fn is_composite_reference(&self) -> bool {
+        matches!(self, FieldValue::CompositeReference(_))
+    }
+
+    pub fn is_blob(&self) -> bool {
+        matches!(self, FieldValue::Blob(_))
     }
 
     pub fn from_str(input: &str, field_type: &SoapType) -> Result<FieldValue> {
@@ -298,8 +277,11 @@ impl SObjectWithId for SObject {
 
     fn set_id(&mut self, id: FieldValue) -> Result<()> {
         match id {
-            FieldValue::Id(_) | FieldValue::Null | FieldValue::CompositeReference(_) => { self.put("id", id); Ok(()) }
-            _ => Err(SalesforceError::UnsupportedId.into())
+            FieldValue::Id(_) | FieldValue::Null | FieldValue::CompositeReference(_) => {
+                self.put("id", id);
+                Ok(())
+            }
+            _ => Err(SalesforceError::UnsupportedId.into()),
         }
     }
 }
@@ -401,56 +383,67 @@ impl SObject {
         }
     }
 
+    #[must_use]
     pub fn with_address(mut self, key: &str, value: Address) -> SObject {
         self.put(key, FieldValue::Address(value));
         self
     }
 
+    #[must_use]
     pub fn with_int(mut self, key: &str, value: i64) -> SObject {
         self.put(key, FieldValue::Integer(value));
         self
     }
 
+    #[must_use]
     pub fn with_double(mut self, key: &str, value: f64) -> SObject {
         self.put(key, FieldValue::Double(value));
         self
     }
 
+    #[must_use]
     pub fn with_boolean(mut self, key: &str, value: bool) -> SObject {
         self.put(key, FieldValue::Boolean(value));
         self
     }
 
+    #[must_use]
     pub fn with_string(mut self, key: &str, value: String) -> SObject {
         self.put(key, FieldValue::String(value));
         self
     }
 
+    #[must_use]
     pub fn with_str(mut self, key: &str, value: &str) -> SObject {
         self.put(key, FieldValue::String(value.to_owned()));
         self
     }
 
+    #[must_use]
     pub fn with_datetime(mut self, key: &str, value: DateTime) -> SObject {
         self.put(key, FieldValue::DateTime(value));
         self
     }
 
+    #[must_use]
     pub fn with_time(mut self, key: &str, value: Time) -> SObject {
         self.put(key, FieldValue::Time(value));
         self
     }
 
+    #[must_use]
     pub fn with_date(mut self, key: &str, value: Date) -> SObject {
         self.put(key, FieldValue::Date(value));
         self
     }
 
+    #[must_use]
     pub fn with_reference(mut self, key: &str, value: SalesforceId) -> SObject {
         self.put(key, FieldValue::Id(value));
         self
     }
 
+    #[must_use]
     pub fn with_relationship(mut self, key: &str, value: SObject) -> SObject {
         self.put(key, FieldValue::Relationship(value));
         self
@@ -458,16 +451,19 @@ impl SObject {
 
     // TODO: Blob, Geolocation
 
+    #[must_use]
     pub fn with_composite_reference(mut self, key: &str, value: &str) -> SObject {
         self.put(key, FieldValue::CompositeReference(value.to_owned()));
         self
     }
 
+    #[must_use]
     pub fn with_geolocation(mut self, key: &str, value: Geolocation) -> SObject {
         self.put(key, FieldValue::Geolocation(value));
         self
     }
 
+    #[must_use]
     pub fn with_null(mut self, key: &str) -> SObject {
         self.put(key, FieldValue::Null);
         self

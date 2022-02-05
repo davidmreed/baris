@@ -151,7 +151,7 @@ impl CompositeResponse {
             .filter(|s| s.reference_id == key)
             .collect();
 
-        if matches.len() > 0 {
+        if !matches.is_empty() {
             Some(matches[0])
         } else {
             None
@@ -164,7 +164,7 @@ impl CompositeResponse {
     {
         let subrequest_response =
             self.get_result_value(key)
-                .ok_or(SalesforceError::GeneralError(
+                .ok_or_else(|| SalesforceError::GeneralError(
                     "Subrequest key does not exist".into(),
                 ))?;
 
@@ -172,7 +172,7 @@ impl CompositeResponse {
             // TODO: handle multiple errors returned.
             CompositeSubrequestResponseBody::Error(errs) => Err(errs[0].clone().into()),
             CompositeSubrequestResponseBody::Success(Some(body)) => {
-                req.get_result(conn, Some(&body))
+                req.get_result(conn, Some(body))
             }
             CompositeSubrequestResponseBody::Success(None) => req.get_result(conn, None),
         }

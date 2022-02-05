@@ -69,6 +69,7 @@ impl Authentication for RefreshTokenAuth {
                 ("client_id", &self.app.consumer_key),
                 ("client_secret", &self.app.client_secret),
                 ("grant_type", &"refresh_token".to_string()),
+                ("refresh_token", &self.refresh_token),
             ])
             .send()
             .await?
@@ -213,6 +214,7 @@ impl Authentication for AccessTokenAuth {
     async fn refresh_access_token(&mut self) -> Result<()> {
         Err(SalesforceError::CannotRefresh.into())
     }
+
     async fn get_instance_url(&self) -> Result<&Url> {
         Ok(&self.instance_url)
     }

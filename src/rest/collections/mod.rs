@@ -204,7 +204,7 @@ where
     R: Send + 'static,
 {
     let (tx, rx) = mpsc::channel(parallel);
-    let conn = connection.clone();
+    let conn = connection;
 
     let mut chunks = Box::pin(sobjects.chunks(batch_size));
 
@@ -484,7 +484,7 @@ impl SObjectCollectionUpdateRequest {
         }
     }
 
-    pub fn new<T>(objects: &Vec<T>, all_or_none: bool) -> Result<Self>
+    pub fn new<T>(objects: &[T], all_or_none: bool) -> Result<Self>
     where
         T: SObjectSerialization + SObjectWithId,
     {
@@ -556,11 +556,11 @@ impl SObjectCollectionUpsertRequest {
             all_or_none,
         }
     }
-    pub fn new<T>(objects: &Vec<T>, external_id: &str, all_or_none: bool) -> Result<Self>
+    pub fn new<T>(objects: &[T], external_id: &str, all_or_none: bool) -> Result<Self>
     where
         T: SObjectSerialization + TypedSObject,
     {
-        if objects.len() > 200 || objects.len() == 0 {
+        if objects.len() > 200 || objects.is_empty() {
             return Err(SalesforceError::SObjectCollectionError.into());
         }
         let sobject_type = objects[0].get_api_name().to_owned();
@@ -624,7 +624,7 @@ impl SObjectCollectionDeleteRequest {
         Self { ids, all_or_none }
     }
 
-    pub fn new<T>(objects: &Vec<T>, all_or_none: bool) -> Result<Self>
+    pub fn new<T>(objects: &[T], all_or_none: bool) -> Result<Self>
     where
         T: SObjectWithId,
     {

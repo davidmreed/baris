@@ -61,12 +61,12 @@ impl Display for ExecuteAnonymousApexResponse {
 
 impl Error for ExecuteAnonymousApexResponse {}
 
-impl Into<Result<(), anyhow::Error>> for ExecuteAnonymousApexResponse {
-    fn into(self) -> Result<(), anyhow::Error> {
-        if self.compiled && self.success {
+impl From<ExecuteAnonymousApexResponse> for Result<(), anyhow::Error> {
+    fn from(val: ExecuteAnonymousApexResponse) -> Self {
+        if val.compiled && val.success {
             Ok(())
         } else {
-            Err(self.into())
+            Err(val.into())
         }
     }
 }

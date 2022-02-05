@@ -53,18 +53,18 @@ async fn test_composite_request_create_update_delete() -> Result<()> {
     let conn = get_test_connection()?;
     let mut request = CompositeRequest::new(conn.get_base_url_path(), Some(true), Some(false));
     let account_type = &conn.get_type("Account").await?;
-    let account = SObject::new(&account_type).with_str("Name", "Test");
-    let mut account_request = SObjectCreateRequest::new(&account)?;
-    let updated_account = SObject::new(&account_type)
+    let account = SObject::new(account_type).with_str("Name", "Test");
+    let account_request = SObjectCreateRequest::new(&account)?;
+    let updated_account = SObject::new(account_type)
         .with_composite_reference("Id", "@{create.id}")
         .with_str("Name", "Foo");
-    let delete_account = SObject::new(&account_type).with_composite_reference("Id", "@{create.id}");
-    let mut update_account_request = SObjectUpdateRequest::new(&updated_account)?;
-    let mut delete_account_request = SObjectDeleteRequest::new(&delete_account)?;
+    let delete_account = SObject::new(account_type).with_composite_reference("Id", "@{create.id}");
+    let update_account_request = SObjectUpdateRequest::new(&updated_account)?;
+    let delete_account_request = SObjectDeleteRequest::new(&delete_account)?;
 
-    request.add("create", &mut account_request)?;
-    request.add("update", &mut update_account_request)?;
-    request.add("delete", &mut delete_account_request)?;
+    request.add("create", &account_request)?;
+    request.add("update", &update_account_request)?;
+    request.add("delete", &delete_account_request)?;
 
     let result = conn.execute(&request).await?;
     let _account_result = result.get_result(&conn, "delete", &delete_account_request)?;
@@ -92,14 +92,14 @@ async fn test_composite_request_collections() -> Result<()> {
     let conn = get_test_connection()?;
     let mut request = CompositeRequest::new(conn.get_base_url_path(), Some(true), Some(false));
     let account_type = &conn.get_type("Account").await?;
-    let account = SObject::new(&account_type).with_str("Name", "Test");
-    let mut account_request = SObjectCollectionCreateRequest::new(&vec![account], true)?;
+    let account = SObject::new(account_type).with_str("Name", "Test");
+    let account_request = SObjectCollectionCreateRequest::new(&[account], true)?;
     let delete_account =
-        SObject::new(&account_type).with_composite_reference("Id", "@{create[0].id}");
-    let mut delete_account_request = SObjectDeleteRequest::new(&delete_account)?;
+        SObject::new(account_type).with_composite_reference("Id", "@{create[0].id}");
+    let delete_account_request = SObjectDeleteRequest::new(&delete_account)?;
 
-    request.add("create", &mut account_request)?;
-    request.add("delete", &mut delete_account_request)?;
+    request.add("create", &account_request)?;
+    request.add("delete", &delete_account_request)?;
 
     let result = conn.execute(&request).await?;
     let _account_result = result.get_result(&conn, "delete", &delete_account_request)?;

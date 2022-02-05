@@ -130,16 +130,14 @@ impl Connection {
             self.refresh_access_token().await?;
             self.get_current_access_token()
                 .await
-                .ok_or(SalesforceError::CannotRefresh.into()) // Right error?
+                .ok_or_else(|| SalesforceError::CannotRefresh.into()) // Right error?
         }
     }
 
     async fn get_current_access_token(&self) -> Option<String> {
         let access_token = self.auth.read().await;
 
-        access_token
-            .get_access_token()
-            .and_then(|s| Some(s.clone()))
+        access_token.get_access_token().cloned()
     }
 
     pub async fn refresh_access_token(&self) -> Result<()> {
@@ -150,7 +148,7 @@ impl Connection {
         // Attempt to obtain the Mutex that gates a refresh process.
         let auth_permission_handle = self.auth_refresh.try_lock();
         // If we got the mutex, also get a write lock on AuthDetails.
-        let auth_lock = if let Ok(_) = auth_permission_handle {
+        let auth_lock = if auth_permission_handle.is_ok() {
             // We got the mutex lock, which means we should actually process the refresh.
             Some(self.auth.write().await)
         } else {
@@ -161,7 +159,7 @@ impl Connection {
         drop(global_auth_handle);
 
         // If we are the task that will be performing this refresh, do so.
-        if let Ok(_) = auth_permission_handle {
+        if auth_permission_handle.is_ok() {
             auth_lock.unwrap().refresh_access_token().await?;
         } else {
             // We didn't get the mutex lock, which means someone else is running the operation,

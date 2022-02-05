@@ -148,12 +148,7 @@ where
             // TODO: respect this job's settings for delimiter.
             let buffer = csv::Reader::from_reader(&*result.content)
                 .into_deserialize::<HashMap<String, String>>()
-                .map(|r| {
-                    Ok(T::from_value(
-                        &value_from_csv(&r?, &sobject_type)?,
-                        &sobject_type,
-                    )?)
-                })
+                .map(|r| T::from_value(&value_from_csv(&r?, &sobject_type)?, &sobject_type))
                 .collect::<Result<VecDeque<T>>>()?;
 
             let done = result.locator.is_none();
@@ -308,9 +303,7 @@ impl SalesforceRawRequest for BulkQueryJobResultsRequest {
         // Ingest the headers that contain our next locator.
         let locator_header = headers
             .get("Sforce-Locator")
-            .ok_or(SalesforceError::GeneralError(
-                "No record set locator returned".into(),
-            ))?
+            .ok_or_else(|| SalesforceError::GeneralError("No record set locator returned".into()))?
             .to_str()?;
 
         Ok(BulkQueryJobResultsResponse {
@@ -345,7 +338,7 @@ impl BulkQueryJob {
 
     pub async fn complete(self, conn: &Connection) -> Result<BulkQueryJob> {
         loop {
-            let status: BulkQueryJob = self.check_status(&conn).await?;
+            let status: BulkQueryJob = self.check_status(conn).await?;
 
             if status.state.is_completed_state() {
                 return Ok(status);
@@ -572,7 +565,7 @@ impl SalesforceRequest for BulkDmlJobListRequest {
     type ReturnValue = BulkDmlJobListResponse;
 
     fn get_url(&self) -> String {
-        format!("jobs/ingest")
+        "jobs/ingest".to_string()
     }
 
     fn get_query_parameters(&self) -> Option<Value> {
@@ -679,7 +672,7 @@ impl BulkDmlJob {
 
     pub async fn complete(&self, conn: &Connection) -> Result<Self> {
         loop {
-            let status = self.check_status(&conn).await?;
+            let status = self.check_status(conn).await?;
 
             if status.state.is_completed_state() {
                 return Ok(status);

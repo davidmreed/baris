@@ -186,19 +186,19 @@ impl SObjectUpsertRequest {
         let s = sobject.to_value()?;
         if let Value::Object(ref map) = s {
             let field_value = map.get(external_id);
-            if field_value.is_none() {
-                Err(
-                    SalesforceError::GeneralError(format!("Cannot upsert without a field value."))
-                        .into(),
-                )
-            } else {
-                let ext_id_value = field_value.unwrap().to_string();
+            if let Some(field_value) = field_value {
+                let ext_id_value = field_value.to_string();
                 Ok(Self::new_raw(
                     s,
                     sobject.get_api_name().to_owned(),
                     external_id.to_owned(),
                     ext_id_value, // TODO: does this yield the correct value for all ExtId-capable types?
                 ))
+            } else {
+                Err(
+                    SalesforceError::GeneralError("Cannot upsert without a field value.".to_string())
+                        .into(),
+                )
             }
         } else {
             Err(SalesforceError::UnknownError.into())
