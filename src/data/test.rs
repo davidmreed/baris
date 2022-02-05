@@ -95,8 +95,21 @@ fn test_dates_serialize() -> Result<()> {
 }
 
 #[test]
-fn test_times() {
-    todo!()
+fn test_times_deserialize() -> Result<()> {
+    assert_eq!(
+        serde_json::from_str::<Time>("\"10:45:12.456Z\"")?,
+        Time::new(10, 45, 12, 456)?
+    );
+    Ok(())
+}
+
+#[test]
+fn test_times_serialize() -> Result<()> {
+    assert_eq!(
+        serde_json::to_string(&Time::new(10, 45, 12, 456)?)?,
+        "\"10:45:12.456Z\""
+    );
+    Ok(())
 }
 
 #[tokio::test]
