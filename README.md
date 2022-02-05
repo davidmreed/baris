@@ -1,5 +1,7 @@
 # Baris
 
+**Important: Baris is an early preview with known bugs and elements that are not implemented. Baris is not ready for production use.**
+
 Baris is a Rust crate for integrating to Salesforce. Baris supports the Salesforce REST, Collections, Composite, Bulk (2.0), and Tooling (partial) APIs, and provides extensive facilities for working with data over the API. Baris is async- and parallel-first, and requires the Tokio runtime.
 
 Baris is intended to be the Rust answer to projects like `simple_salesforce` (Python) and JSForce (JavaScript).
