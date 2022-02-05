@@ -162,11 +162,9 @@ impl CompositeResponse {
     where
         K: SalesforceRequest<ReturnValue = T>,
     {
-        let subrequest_response =
-            self.get_result_value(key)
-                .ok_or_else(|| SalesforceError::GeneralError(
-                    "Subrequest key does not exist".into(),
-                ))?;
+        let subrequest_response = self
+            .get_result_value(key)
+            .ok_or_else(|| SalesforceError::GeneralError("Subrequest key does not exist".into()))?;
 
         match &subrequest_response.body {
             // TODO: handle multiple errors returned.

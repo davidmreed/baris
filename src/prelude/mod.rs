@@ -10,12 +10,12 @@ pub use crate::bulk::v2::traits::{
 };
 
 // Data
-pub use crate::data::types::{SalesforceId, Geolocation, Address, DateTime, Date, Time};
 pub use crate::data::sobjects::{FieldValue, SObject, SObjectType};
 pub use crate::data::traits::{
     DynamicallyTypedSObject, SObjectBase, SObjectDeserialization, SObjectRepresentation,
     SObjectSerialization, SObjectWithId, SingleTypedSObject, TypedSObject,
 };
+pub use crate::data::types::{Address, Date, DateTime, Geolocation, SalesforceId, Time};
 
 // REST
 pub use crate::rest::collections::traits::{

@@ -32,15 +32,21 @@ impl SObjectWithId for Account {
     fn get_id(&self) -> FieldValue {
         match self.get_opt_id() {
             Some(id) => FieldValue::Id(id),
-            None => FieldValue::Null
+            None => FieldValue::Null,
         }
     }
 
     fn set_id(&mut self, id: FieldValue) -> Result<()> {
         match id {
-            FieldValue::Id(id) => {self.set_opt_id(Some(id))?; Ok(())},
-            FieldValue::Null => {self.set_opt_id(None)?; Ok(())},
-            _ => Err(SalesforceError::UnsupportedId.into())
+            FieldValue::Id(id) => {
+                self.set_opt_id(Some(id))?;
+                Ok(())
+            }
+            FieldValue::Null => {
+                self.set_opt_id(None)?;
+                Ok(())
+            }
+            _ => Err(SalesforceError::UnsupportedId.into()),
         }
     }
 

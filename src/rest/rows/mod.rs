@@ -195,10 +195,10 @@ impl SObjectUpsertRequest {
                     ext_id_value, // TODO: does this yield the correct value for all ExtId-capable types?
                 ))
             } else {
-                Err(
-                    SalesforceError::GeneralError("Cannot upsert without a field value.".to_string())
-                        .into(),
+                Err(SalesforceError::GeneralError(
+                    "Cannot upsert without a field value.".to_string(),
                 )
+                .into())
             }
         } else {
             Err(SalesforceError::UnknownError.into())
