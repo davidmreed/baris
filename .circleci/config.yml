@@ -74,3 +74,4 @@ workflows:
       - clippy
       - format
       - test
+      - integration-test
