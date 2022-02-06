@@ -50,9 +50,23 @@ jobs:
           command: |
             rustup default nightly
       - run:
+          name: Create Scratch Org
+          command: |
+            wget https://developer.salesforce.com/media/salesforce-cli/sfdx-linux-amd64.tar.xz
+            mkdir sfdx-cli
+            tar xJf sfdx-linux-amd64.tar.xz -C sfdx-cli --strip-components 1
+            ./sfdx-cli/install
+            echo $DEVHUB_SFDX_URL > ./DEVHUB_SFDX_URL.txt
+            sfdx auth:sfdxurl:store -f ./DEVHUB_SFDX_URL.txt -a DevHub -d
+            source scratch-org.sh
+      - run:
           name: Integration Test
           command: |
             cargo test -- --ignored
+      - run:
+          name: Delete Scratch Org
+          command: |
+            sfdx force:org:delete -u baris
 
 workflows:
   test:
