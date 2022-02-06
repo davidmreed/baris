@@ -67,7 +67,7 @@ jobs:
       - run:
           name: Delete Scratch Org
           command: |
-            sfdx force:org:delete -u baris
+            sfdx force:org:delete -p -u baris
 
 workflows:
   test:
