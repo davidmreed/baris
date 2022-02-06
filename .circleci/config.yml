@@ -62,6 +62,7 @@ jobs:
       - run:
           name: Integration Test
           command: |
+            source refresh-token.sh
             cargo test -- --ignored
       - run:
           name: Delete Scratch Org
