@@ -408,7 +408,9 @@ where
     #[serde(rename = "sf__Created")]
     pub created: bool,
     #[serde(rename = "sf__Id")]
-    pub id: SalesforceId,
+    pub id: Option<SalesforceId>,
+    #[serde(rename = "sf__Error")]
+    pub error: Option<String>,
     #[serde(flatten)]
     data: Value,
     phantom: PhantomData<T>,
@@ -421,6 +423,19 @@ where
     pub fn get_sobject(&self, sobject_type: &SObjectType) -> Result<T> {
         T::from_value(&self.data, sobject_type)
     }
+}
+
+// TODO: delimiter settings?
+async fn<T> get_results_stream(response: Response) -> Result<Pin<Box<dyn Stream<Item = Result<T>>>>> where T: Deserialize {
+    Ok(Box::pin(
+        AsyncDeserializer::from_reader(StreamReader::new(
+            response
+                .bytes_stream()
+                .map(|b| b.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e))),
+        ))
+        .into_deserialize::<T>()
+        .map(|r| r.map_err(|e| e.into())),
+    ))
 }
 
 pub struct BulkDmlJobSuccessfulRecordsRequest<T>
@@ -446,28 +461,75 @@ where
         Method::GET
     }
 
-    // TODO: delimiter settings?
     async fn get_result(
         &self,
         _conn: &Connection,
         response: Response,
     ) -> Result<Self::ReturnValue> {
-        Ok(Box::pin(
-            AsyncDeserializer::from_reader(StreamReader::new(
-                response
-                    .bytes_stream()
-                    .map(|b| b.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e))),
-            ))
-            .into_deserialize::<BulkDmlResult<T>>()
-            .map(|r| r.map_err(|e| e.into())),
-        ))
+        get_results_stream(response)
     }
 }
 
-// TODO
-pub struct BulkDmlJobFailedRecordsRequest {}
+
+pub struct BulkDmlJobFailedRecordsRequest<T>
+where
+    T: SObjectDeserialization,
+{
+    id: SalesforceId,
+    phantom: PhantomData<T>,
+}
+
+
+
+#[async_trait]
+impl<T> SalesforceRawRequest for BulkDmlJobFailedRecordsRequest<T>
+where
+    T: SObjectDeserialization,
+{
+    type ReturnValue = Pin<Box<dyn Stream<Item = Result<BulkDmlResult<T>>>>>;
+
+    fn get_url(&self) -> String {
+        format!("jobs/ingest/{}/failedResults", self.id)
+    }
+
+    fn get_method(&self) -> Method {
+        Method::GET
+    }
+
+    async fn get_result(
+        &self,
+        _conn: &Connection,
+        response: Response,
+    ) -> Result<Self::ReturnValue> {
+        get_results_stream(response)
+    }
+}
+
 pub struct BulkDmlJobUnprocessedRecordsRequest {}
 
+#[async_trait]
+impl<T> SalesforceRawRequest for BulkDmlJobUnprocessedRecordsRequest<T>
+where
+    T: SObjectDeserialization,
+{
+    type ReturnValue = Pin<Box<dyn Stream<Item = Result<BulkDmlResult<T>>>>>;
+
+    fn get_url(&self) -> String {
+        format!("jobs/ingest/{}/failedResults", self.id)
+    }
+
+    fn get_method(&self) -> Method {
+        Method::GET
+    }
+
+    async fn get_result(
+        &self,
+        _conn: &Connection,
+        response: Response,
+    ) -> Result<Self::ReturnValue> {
+        get_results_stream(response)
+    }
+}
 pub struct BulkDmlJobSetStatusRequest {
     id: SalesforceId,
     status: BulkJobStatus,
