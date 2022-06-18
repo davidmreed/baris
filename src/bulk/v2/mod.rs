@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::Stream;
 use reqwest::{Body, Method, Response};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -21,7 +21,7 @@ use tokio_util::io::StreamReader;
 use crate::{
     api::Connection,
     api::{SalesforceRawRequest, SalesforceRequest},
-    data::traits::{SObjectDeserialization, SObjectSerialization},
+    data::traits::{SObjectBase, SObjectDeserialization, SObjectSerialization},
     data::DateTime,
     data::SObjectType,
     data::SalesforceId,
@@ -381,7 +381,7 @@ impl BulkDmlJobStatusRequest {
 }
 
 impl SalesforceRequest for BulkDmlJobStatusRequest {
-    type ReturnValue = BulkDmlJob;
+    type ReturnValue = BulkDmlJobDetail;
 
     fn get_url(&self) -> String {
         format!("jobs/ingest/{}", self.id)
@@ -425,36 +425,90 @@ where
     }
 }
 
+struct SObjectDeserializationWrapper<T> {
+    sobject_type: SObjectType,
+    sobject: Option<T>,
+}
+
+impl<T> SObjectDeserializationWrapper<T> {
+    pub fn into_inner(self) -> T {
+        self.sobject.unwrap()
+    }
+}
+
+impl<'de, T> Deserialize<'de> for SObjectDeserializationWrapper<BulkDmlResult<T>>
+where
+    T: SObjectDeserialization,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        todo!()
+    }
+}
+
 // TODO: delimiter settings?
-async fn<T> get_results_stream(response: Response) -> Result<Pin<Box<dyn Stream<Item = Result<T>>>>> where T: Deserialize {
+async fn get_results_stream<'a, T>(
+    response: Response,
+) -> Result<Pin<Box<dyn Stream<Item = Result<BulkDmlResult<T>>>>>>
+where
+    T: SObjectDeserialization + SObjectBase,
+{
+    let s = AsyncDeserializer::from_reader(StreamReader::new(
+        response
+            .bytes_stream()
+            .map(|b| b.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e))),
+    ))
+    .into_deserialize::<SObjectDeserializationWrapper<BulkDmlResult<T>>>();
+
     Ok(Box::pin(
-        AsyncDeserializer::from_reader(StreamReader::new(
-            response
-                .bytes_stream()
-                .map(|b| b.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e))),
-        ))
-        .into_deserialize::<T>()
-        .map(|r| r.map_err(|e| e.into())),
+        s.map(|r| r.map_err(|e| e.into()).map(|o| o.into_inner())),
     ))
 }
 
-pub struct BulkDmlJobSuccessfulRecordsRequest<T>
+pub enum BulkDmlResultType {
+    Successful,
+    Failed,
+    Unprocessed,
+}
+
+pub struct BulkDmlJobResultsRequest<T>
 where
     T: SObjectDeserialization,
 {
     id: SalesforceId,
+    result_type: BulkDmlResultType,
     phantom: PhantomData<T>,
 }
 
-#[async_trait]
-impl<T> SalesforceRawRequest for BulkDmlJobSuccessfulRecordsRequest<T>
+impl<T> BulkDmlJobResultsRequest<T>
 where
     T: SObjectDeserialization,
+{
+    pub fn new(id: SalesforceId, result_type: BulkDmlResultType) -> Self {
+        Self {
+            id,
+            result_type,
+            phantom: PhantomData,
+        }
+    }
+}
+
+#[async_trait]
+impl<T> SalesforceRawRequest for BulkDmlJobResultsRequest<T>
+where
+    T: SObjectDeserialization + SObjectBase,
 {
     type ReturnValue = Pin<Box<dyn Stream<Item = Result<BulkDmlResult<T>>>>>;
 
     fn get_url(&self) -> String {
-        format!("jobs/ingest/{}/successfulResults", self.id)
+        let endpoint = match self.result_type {
+            BulkDmlResultType::Successful => "successfulResults",
+            BulkDmlResultType::Failed => "failedResults",
+            BulkDmlResultType::Unprocessed => "unprocessedResults",
+        };
+        format!("jobs/ingest/{}/{}", self.id, endpoint)
     }
 
     fn get_method(&self) -> Method {
@@ -466,70 +520,10 @@ where
         _conn: &Connection,
         response: Response,
     ) -> Result<Self::ReturnValue> {
-        get_results_stream(response)
+        get_results_stream(response).await
     }
 }
 
-
-pub struct BulkDmlJobFailedRecordsRequest<T>
-where
-    T: SObjectDeserialization,
-{
-    id: SalesforceId,
-    phantom: PhantomData<T>,
-}
-
-
-
-#[async_trait]
-impl<T> SalesforceRawRequest for BulkDmlJobFailedRecordsRequest<T>
-where
-    T: SObjectDeserialization,
-{
-    type ReturnValue = Pin<Box<dyn Stream<Item = Result<BulkDmlResult<T>>>>>;
-
-    fn get_url(&self) -> String {
-        format!("jobs/ingest/{}/failedResults", self.id)
-    }
-
-    fn get_method(&self) -> Method {
-        Method::GET
-    }
-
-    async fn get_result(
-        &self,
-        _conn: &Connection,
-        response: Response,
-    ) -> Result<Self::ReturnValue> {
-        get_results_stream(response)
-    }
-}
-
-pub struct BulkDmlJobUnprocessedRecordsRequest {}
-
-#[async_trait]
-impl<T> SalesforceRawRequest for BulkDmlJobUnprocessedRecordsRequest<T>
-where
-    T: SObjectDeserialization,
-{
-    type ReturnValue = Pin<Box<dyn Stream<Item = Result<BulkDmlResult<T>>>>>;
-
-    fn get_url(&self) -> String {
-        format!("jobs/ingest/{}/failedResults", self.id)
-    }
-
-    fn get_method(&self) -> Method {
-        Method::GET
-    }
-
-    async fn get_result(
-        &self,
-        _conn: &Connection,
-        response: Response,
-    ) -> Result<Self::ReturnValue> {
-        get_results_stream(response)
-    }
-}
 pub struct BulkDmlJobSetStatusRequest {
     id: SalesforceId,
     status: BulkJobStatus,
@@ -659,7 +653,7 @@ pub enum BulkApiDmlOperation {
 
 #[derive(Serialize, Deserialize)]
 pub enum BulkApiJobType {
-    // serde rename is not required; this are the actual API values
+    // serde rename is not required; these are the actual API values
     BigObjectIngest,
     Classic,
     V2Ingest,
@@ -667,33 +661,50 @@ pub enum BulkApiJobType {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BulkDmlJob {
+pub struct BulkDmlJobDetail {
     pub id: SalesforceId,
     pub assignment_rule_id: Option<SalesforceId>,
-    pub column_delimiter: Option<BulkApiColumnDelimiter>, // TODO: I guess this isn't returned from some calls...?
+    pub column_delimiter: BulkApiColumnDelimiter,
     pub content_type: BulkApiContentType,
     pub external_id_field_name: Option<String>,
-    pub line_ending: Option<BulkApiLineEnding>, // TODO: this one too
+    pub line_ending: BulkApiLineEnding,
     pub object: String,
     pub operation: BulkApiDmlOperation,
     pub api_version: f32,
     pub concurrency_mode: BulkApiConcurrencyMode,
-    pub content_url: Option<String>, // TODO: this one too
+    pub content_url: String,
     pub created_by_id: SalesforceId,
     pub created_date: DateTime,
-    pub job_type: Option<BulkApiJobType>, // TODO: why is this not returned from Create()
+    pub job_type: BulkApiJobType,
     pub state: BulkJobStatus,
     pub system_modstamp: DateTime,
-    // These properties appear to only be returned on a Get Job Info, not a Create Job. TODO
-    pub apex_processing_time: Option<u64>,
-    pub api_active_processing_time: Option<u64>,
-    pub number_records_failed: Option<u64>,
-    pub number_records_processed: Option<u64>,
-    pub retries: Option<u32>,
-    pub total_processing_time: Option<u64>,
+    pub apex_processing_time: u64,
+    pub api_active_processing_time: u64,
+    pub number_records_failed: u64,
+    pub number_records_processed: u64,
+    pub retries: u32,
+    pub total_processing_time: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkDmlJob {
+    pub id: SalesforceId,
+    pub assignment_rule_id: Option<SalesforceId>,
+    pub content_type: BulkApiContentType,
+    pub external_id_field_name: Option<String>,
+    pub object: String,
+    pub operation: BulkApiDmlOperation,
+    pub api_version: f32,
+    pub concurrency_mode: BulkApiConcurrencyMode,
+    pub created_by_id: SalesforceId,
+    pub created_date: DateTime,
+    pub state: BulkJobStatus,
+    pub system_modstamp: DateTime,
 }
 
 impl BulkDmlJob {
+    // TODO: distinguish appropriately between BulkDmlJob and BulkDmlJobDetail
     pub async fn query(
         conn: &Connection,
         is_pk_chunking_enabled: Option<bool>,
@@ -727,12 +738,12 @@ impl BulkDmlJob {
     where
         T: SObjectSerialization + Serialize,
     {
-        Ok(conn
-            .execute_raw_request(&BulkDmlJobIngestRequest::new(self.id, records))
-            .await?)
+        conn.execute_raw_request(&BulkDmlJobIngestRequest::new(self.id, records))
+            .await?;
+        Ok(())
     }
 
-    pub async fn complete(&self, conn: &Connection) -> Result<Self> {
+    pub async fn complete(&self, conn: &Connection) -> Result<BulkDmlJobDetail> {
         loop {
             let status = self.check_status(conn).await?;
 
@@ -744,7 +755,7 @@ impl BulkDmlJob {
         }
     }
 
-    pub async fn check_status(&self, conn: &Connection) -> Result<Self> {
+    pub async fn check_status(&self, conn: &Connection) -> Result<BulkDmlJobDetail> {
         Ok(conn.execute(&BulkDmlJobStatusRequest::new(self.id)).await?)
     }
 
@@ -888,6 +899,8 @@ impl SalesforceRawRequest for BulkDmlJobIngestRequest {
         // This is not a good implementation. Panics are possible
         // and this results in only one possible call to get_body().
         // TODO: should get_body() consume self?
+        // We really don't want it to, as that blocks us from doing retries
+        // if our access token has expired.
         Some(Body::wrap_stream(
             self.body.write().unwrap().take().unwrap(),
         ))

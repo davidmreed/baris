@@ -1,5 +1,3 @@
-#![feature(async_stream)]
-
 pub mod api;
 pub mod auth;
 pub mod bulk;
