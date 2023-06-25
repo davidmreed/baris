@@ -15,7 +15,7 @@ use serde_derive::{Deserialize, Serialize};
 
 use crate::{api::Connection, errors::SalesforceError, rest::rows::BlobRetrieveRequest};
 
-#[derive(Serialize, Deserialize, Copy, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Copy, Clone, PartialEq, Eq)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
 pub struct SalesforceId {
@@ -89,7 +89,7 @@ impl From<SalesforceId> for String {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Deserialize)]
 #[serde(try_from = "String")]
 pub struct DateTime(chrono::DateTime<chrono::Utc>);
 
@@ -158,7 +158,7 @@ impl Serialize for DateTime {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Deserialize)]
 #[serde(try_from = "String")]
 pub struct Time(chrono::NaiveTime);
 
@@ -213,7 +213,7 @@ impl Serialize for Time {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct Date(chrono::NaiveDate);
 
 impl Date {
@@ -254,7 +254,7 @@ impl FromStr for Date {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Deserialize)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
 pub struct Blob(String);
@@ -265,9 +265,8 @@ impl Blob {
         &self,
         conn: &Connection,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>>>>> {
-        Ok(conn
-            .execute_raw_request(&BlobRetrieveRequest::new(self.0.clone()))
-            .await?)
+        conn.execute_raw_request(&BlobRetrieveRequest::new(self.0.clone()))
+            .await
     }
 }
 
@@ -305,7 +304,7 @@ pub struct Address {
     pub street: Option<String>,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Copy, Clone)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Copy, Clone)]
 pub enum SoapType {
     #[serde(rename = "urn:address")]
     Address,

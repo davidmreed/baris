@@ -103,15 +103,6 @@ pub trait SObjectSerialization: SObjectBase {
     fn to_value_with_options(&self, include_type: bool, include_id: bool) -> Result<Value>;
 }
 
-impl<'a, T> SObjectDeserialization for T
-where
-    T: for<'de> serde::Deserialize<'de> + SObjectBase,
-{
-    fn from_value(value: &serde_json::Value, _sobjecttype: &SObjectType) -> Result<Self> {
-        Ok(serde_json::from_value::<Self>(value.clone())?) // TODO: make this not clone.
-    }
-}
-
 impl<T> SObjectSerialization for T
 where
     T: serde::Serialize + SObjectWithId + TypedSObject + SObjectBase,

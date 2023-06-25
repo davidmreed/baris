@@ -20,7 +20,7 @@ impl ExecuteAnonymousApexRequest {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecuteAnonymousApexResponse {
     pub line: i64,

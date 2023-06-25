@@ -37,7 +37,7 @@ mod test;
 
 const POLL_INTERVAL: u64 = 10;
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub enum BulkJobStatus {
     Open,
     UploadComplete,
@@ -53,20 +53,20 @@ impl BulkJobStatus {
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum BulkQueryOperation {
     Query,
     QueryAll,
 }
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub enum BulkApiLineEnding {
     LF,
     CRLF,
 }
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum BulkApiColumnDelimiter {
     Backquote,
@@ -77,13 +77,13 @@ pub enum BulkApiColumnDelimiter {
     Tab,
 }
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub enum BulkApiConcurrencyMode {
     // This type uses uppercase, so no serde-renaming required.
     Parallel,
 }
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub enum BulkApiContentType {
     CSV,
 }
@@ -320,9 +320,8 @@ impl SalesforceRawRequest for BulkQueryJobResultsRequest {
 
 impl BulkQueryJob {
     pub async fn create(conn: &Connection, query: &str, query_all: bool) -> Result<Self> {
-        Ok(conn
-            .execute(&BulkQueryJobCreateRequest::new(query.to_owned(), query_all))
-            .await?)
+        conn.execute(&BulkQueryJobCreateRequest::new(query.to_owned(), query_all))
+            .await
     }
 
     pub async fn abort(&self, _conn: &Connection) -> Result<()> {
@@ -331,9 +330,7 @@ impl BulkQueryJob {
 
     // TODO: should this take `&mut self` and replace self, returning Result<()>?
     pub async fn check_status(&self, conn: &Connection) -> Result<BulkQueryJob> {
-        Ok(conn
-            .execute(&BulkQueryJobStatusRequest::new(self.id))
-            .await?)
+        conn.execute(&BulkQueryJobStatusRequest::new(self.id)).await
     }
 
     pub async fn complete(self, conn: &Connection) -> Result<BulkQueryJob> {
@@ -440,7 +437,7 @@ impl<'de, T> Deserialize<'de> for SObjectDeserializationWrapper<BulkDmlResult<T>
 where
     T: SObjectDeserialization,
 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
@@ -704,20 +701,18 @@ pub struct BulkDmlJob {
 }
 
 impl BulkDmlJob {
-    // TODO: distinguish appropriately between BulkDmlJob and BulkDmlJobDetail
     pub async fn query(
         conn: &Connection,
         is_pk_chunking_enabled: Option<bool>,
         job_type: Option<BulkApiJobType>,
         query_locator: Option<String>,
     ) -> Result<BulkDmlJobListResponse> {
-        Ok(conn
-            .execute(&BulkDmlJobListRequest::new(
-                is_pk_chunking_enabled,
-                job_type,
-                query_locator,
-            ))
-            .await?)
+        conn.execute(&BulkDmlJobListRequest::new(
+            is_pk_chunking_enabled,
+            job_type,
+            query_locator,
+        ))
+        .await
     }
 
     pub async fn create(
@@ -725,9 +720,8 @@ impl BulkDmlJob {
         operation: BulkApiDmlOperation,
         object: String,
     ) -> Result<BulkDmlJob> {
-        Ok(conn
-            .execute(&BulkDmlJobCreateRequest::new(operation, object))
-            .await?)
+        conn.execute(&BulkDmlJobCreateRequest::new(operation, object))
+            .await
     }
 
     pub async fn ingest<T>(
@@ -756,29 +750,27 @@ impl BulkDmlJob {
     }
 
     pub async fn check_status(&self, conn: &Connection) -> Result<BulkDmlJobDetail> {
-        Ok(conn.execute(&BulkDmlJobStatusRequest::new(self.id)).await?)
+        conn.execute(&BulkDmlJobStatusRequest::new(self.id)).await
     }
 
     pub async fn abort(&self, conn: &Connection) -> Result<Self> {
-        Ok(conn
-            .execute(&BulkDmlJobSetStatusRequest::new(
-                self.id,
-                BulkJobStatus::Aborted,
-            ))
-            .await?)
+        conn.execute(&BulkDmlJobSetStatusRequest::new(
+            self.id,
+            BulkJobStatus::Aborted,
+        ))
+        .await
     }
 
     pub async fn close(&self, conn: &Connection) -> Result<Self> {
-        Ok(conn
-            .execute(&BulkDmlJobSetStatusRequest::new(
-                self.id,
-                BulkJobStatus::UploadComplete,
-            ))
-            .await?)
+        conn.execute(&BulkDmlJobSetStatusRequest::new(
+            self.id,
+            BulkJobStatus::UploadComplete,
+        ))
+        .await
     }
 
     pub async fn delete(&self, conn: &Connection) -> Result<()> {
-        Ok(conn.execute(&BulkDmlJobDeleteRequest::new(self.id)).await?)
+        conn.execute(&BulkDmlJobDeleteRequest::new(self.id)).await
     }
 }
 
@@ -865,6 +857,13 @@ where
         },
     ))
 }
+
+// The job of this code is to store an `AsyncWriter`. When polled,
+// it polls its own parent stream, and writes a record to the `AsyncWriter`.
+// It then flushes the writer and yields the bytes stored in the buffer.
+//
+// When the parent stream terminates, we flush the writer and yield any final bytes,
+// then terminate as well.
 
 pub struct BulkDmlJobIngestRequest {
     id: SalesforceId,

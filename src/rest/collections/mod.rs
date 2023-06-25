@@ -212,9 +212,9 @@ where
         while let Some(chunk) = chunks.next().await {
             let c = conn.clone();
             let o = operation.clone();
-            tx.send(spawn(async move {
-                return o.perform_dml(chunk, c, all_or_none).await;
-            }))
+            tx.send(spawn(
+                async move { o.perform_dml(chunk, c, all_or_none).await },
+            ))
             .await;
         }
     });

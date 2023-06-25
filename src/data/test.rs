@@ -32,7 +32,7 @@ fn test_salesforce_id_errors() {
 fn test_datetimes_parse() -> Result<()> {
     assert_eq!(
         "2021-11-19T01:51:47.323+0000".parse::<DateTime>()?,
-        DateTime::new(2021, 11, 19, 01, 51, 47, 323)?
+        DateTime::new(2021, 11, 19, 1, 51, 47, 323)?
     );
     Ok(())
 }
@@ -40,7 +40,7 @@ fn test_datetimes_parse() -> Result<()> {
 #[test]
 fn test_datetimes_format() -> Result<()> {
     assert_eq!(
-        DateTime::new(2021, 11, 19, 01, 51, 47, 323)?.to_string(),
+        DateTime::new(2021, 11, 19, 1, 51, 47, 323)?.to_string(),
         "2021-11-19T01:51:47.323+0000"
     );
     Ok(())
@@ -50,7 +50,7 @@ fn test_datetimes_format() -> Result<()> {
 fn test_datetimes_deserialize() -> Result<()> {
     assert_eq!(
         serde_json::from_str::<DateTime>("\"2021-11-19T01:51:47.323+0000\"")?,
-        DateTime::new(2021, 11, 19, 01, 51, 47, 323)?
+        DateTime::new(2021, 11, 19, 1, 51, 47, 323)?
     );
     Ok(())
 }
@@ -58,7 +58,7 @@ fn test_datetimes_deserialize() -> Result<()> {
 #[test]
 fn test_datetimes_serialize() -> Result<()> {
     assert_eq!(
-        serde_json::to_string(&DateTime::new(2021, 11, 19, 01, 51, 47, 323)?)?,
+        serde_json::to_string(&DateTime::new(2021, 11, 19, 1, 51, 47, 323)?)?,
         "\"2021-11-19T01:51:47.323+0000\""
     );
     Ok(())
