@@ -13,6 +13,69 @@ use crate::{
 #[cfg(test)]
 mod test;
 
+pub struct GlobalDescribeRequest {}
+
+impl GlobalDescribeRequest {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl SalesforceRequest for GlobalDescribeRequest {
+    type ReturnValue = GlobalDescribe;
+
+    fn get_url(&self) -> String {
+        "sobjects".to_owned()
+    }
+
+    fn get_method(&self) -> Method {
+        Method::GET
+    }
+
+    fn get_result(&self, _conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {
+        if let Some(body) = body {
+            Ok(serde_json::from_value::<Self::ReturnValue>(body.clone())?)
+        } else {
+            Err(SalesforceError::ResponseBodyExpected.into())
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LightSObjectDescribe {
+    pub activateable: bool,
+    pub custom: bool,
+    pub custom_setting: bool,
+    pub createable: bool,
+    pub deletable: bool,
+    pub deprecated_and_hidden: bool,
+    pub feed_enabled: bool,
+    pub key_prefix: Option<String>, // key prefix can be null???
+    pub label: Option<String>,
+    pub label_plural: Option<String>,
+    pub layoutable: bool,
+    pub mergeable: bool,
+    pub mru_enabled: bool,
+    pub name: Option<String>,
+    pub queryable: bool,
+    pub replicateable: bool,
+    pub retrieveable: bool,
+    pub searchable: bool,
+    pub triggerable: bool,
+    pub undeletable: bool,
+    pub updateable: bool,
+    pub urls: HashMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalDescribe {
+    pub encoding: Option<String>,
+    pub max_batch_size: Option<u16>, // confirm
+    pub sobjects: Vec<LightSObjectDescribe>,
+}
+
 pub struct SObjectDescribeRequest {
     sobject: String,
 }
@@ -45,7 +108,7 @@ impl SalesforceRequest for SObjectDescribeRequest {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FieldDescribe {
     pub aggregatable: bool,
@@ -122,7 +185,7 @@ pub struct ChildRelationshipDescribe {
     pub restricted_delete: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordTypeDescribe {
     pub active: bool,
@@ -135,13 +198,13 @@ pub struct RecordTypeDescribe {
     pub urls: HashMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ScopeDescribe {
     pub label: String,
     pub name: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SObjectDescribe {
     //action_overrides: Vec<ActionOverrideDescribe>,
@@ -157,13 +220,13 @@ pub struct SObjectDescribe {
     //extendedBy: null
     //extendsInterfaces: null
     pub feed_enabled: bool,
-    fields: Vec<FieldDescribe>,
+    pub fields: Vec<FieldDescribe>,
     pub has_subtypes: bool,
     //implementedBy: Option<String>,
     //implementsInterfaces: Option<String>,
     pub is_interface: bool,
     pub is_subtype: bool,
-    pub key_prefix: String,
+    pub key_prefix: Option<String>,
     pub label: String,
     pub label_plural: String,
     pub layoutable: bool,
@@ -202,7 +265,7 @@ impl SObjectDescribe {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PicklistValueDescribe {
     pub active: bool,

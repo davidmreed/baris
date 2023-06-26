@@ -11,7 +11,7 @@ use super::data::SObjectType;
 use super::errors::SalesforceError;
 
 use crate::auth::Authentication;
-use crate::rest::describe::{SObjectDescribe, SObjectDescribeRequest};
+use crate::rest::describe::{GlobalDescribeRequest, SObjectDescribe, SObjectDescribeRequest};
 
 use anyhow::{Error, Result};
 use async_trait::async_trait;
@@ -170,6 +170,17 @@ impl Connection {
         }
 
         Ok(())
+    }
+
+    pub async fn get_sobject_types(&self) -> Result<Vec<String>> {
+        Ok(self
+            .execute(&GlobalDescribeRequest::new())
+            .await?
+            .sobjects
+            .into_iter()
+            .filter(|s| s.name.is_some())
+            .map(|s| s.name.unwrap())
+            .collect())
     }
 
     pub async fn get_type(&self, type_name: &str) -> Result<SObjectType> {
