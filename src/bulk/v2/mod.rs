@@ -328,17 +328,19 @@ impl BulkQueryJob {
         todo!();
     }
 
-    // TODO: should this take `&mut self` and replace self, returning Result<()>?
-    pub async fn check_status(&self, conn: &Connection) -> Result<BulkQueryJob> {
-        conn.execute(&BulkQueryJobStatusRequest::new(self.id)).await
+    pub async fn check_status(&mut self, conn: &Connection) -> Result<()> {
+        *self = conn
+            .execute(&BulkQueryJobStatusRequest::new(self.id))
+            .await?;
+        Ok(())
     }
 
-    pub async fn complete(self, conn: &Connection) -> Result<BulkQueryJob> {
+    pub async fn complete(&mut self, conn: &Connection) -> Result<()> {
         loop {
-            let status: BulkQueryJob = self.check_status(conn).await?;
+            self.check_status(conn).await?;
 
-            if status.state.is_completed_state() {
-                return Ok(status);
+            if self.state.is_completed_state() {
+                return Ok(());
             }
 
             sleep(Duration::from_secs(POLL_INTERVAL)).await;

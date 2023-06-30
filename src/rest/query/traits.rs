@@ -14,6 +14,8 @@ use super::{AggregateResult, QueryRequest};
 #[async_trait]
 pub trait Queryable: DynamicallyTypedSObject + SObjectDeserialization {
     // TODO: is a default implementation here the right approach, or a blanket impl?
+    // TODO: we could get the sObject type from the `attributes` of the first result,
+    // and unify the query traits.
     async fn query(
         conn: &Connection,
         sobject_type: &SObjectType,

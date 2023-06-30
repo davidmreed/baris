@@ -109,11 +109,19 @@ impl QueryResult {
 
     pub(crate) fn to_result_stream_state<T>(
         self,
-        sobject_type: &SObjectType,
+        sobject_type: &Option<SObjectType>,
     ) -> Result<ResultStreamState<T>>
     where
         T: SObjectDeserialization + Sync + Send + Unpin + 'static,
     {
+        let mut sobject_type = *sobject_type;
+
+        if sobject_type.is_none() && self.records.len() > 0 {
+            // Infer the sObject type from the results.
+            let result_type = self.records[0].get("attributes").get("type");
+
+            sobject_type = Some(conn.get_type(result_type).await?);
+        }
         Ok(ResultStreamState::new(
             self.records
                 .iter()
@@ -128,13 +136,14 @@ impl QueryResult {
 
 struct QueryStreamLocatorManager<T: SObjectDeserialization + Unpin> {
     conn: Connection,
-    sobject_type: SObjectType,
+    // We may need to populate sobject_type from the `attributes` of our first result.
+    sobject_type: Option<SObjectType>,
     phantom: PhantomData<T>,
 }
 
 impl<T> ResultStreamManager for QueryStreamLocatorManager<T>
 where
-    T: SObjectDeserialization + Unpin, // TODO: why is this lifetime required?
+    T: SObjectDeserialization + Unpin,
 {
     type Output = T;
 
