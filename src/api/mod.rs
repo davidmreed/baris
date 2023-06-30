@@ -22,6 +22,7 @@ use tokio::sync::{Mutex, RwLock};
 #[cfg(test)]
 mod test;
 
+#[async_trait]
 pub trait SalesforceRequest {
     type ReturnValue;
 
@@ -31,34 +32,26 @@ pub trait SalesforceRequest {
 
     fn get_url(&self) -> String;
     fn get_method(&self) -> Method;
-
-    fn get_query_parameters(&self) -> Option<Value> {
-        None
-    }
-
-    fn get_result(&self, conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue>;
-}
-
-#[async_trait]
-pub(crate) trait SalesforceRawRequest {
-    type ReturnValue;
-
-    fn get_body(&self) -> Option<Body> {
-        None
-    }
     fn get_mime_type(&self) -> String {
         "text/json".to_owned()
     }
-
-    fn get_url(&self) -> String;
-    fn get_method(&self) -> Method;
 
     fn get_query_parameters(&self) -> Option<Value> {
         None
     }
 
     async fn get_result(&self, conn: &Connection, response: Response) -> Result<Self::ReturnValue>;
+    fn get_result(&self, conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue>;
 }
+
+trait SalesforceRequestParsing {
+    type ReturnValue;
+
+    async fn get_result(&self, conn: &Connection, response: Response) -> Result<Self::ReturnValue>;
+    fn get_result(&self, conn: &Connection, body: Option<&Value>) -> Result<Self::ReturnValue> {}
+}
+
+impl SalesforceRequestParsing<T> for T where T: Deserialize {}
 
 pub trait CompositeFriendlyRequest: SalesforceRequest {}
 
